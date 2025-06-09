@@ -20,57 +20,6 @@ library(emmeans)
 install.packages("tidybayes")
 library(tidybayes)
 
-###### pseudo R2 function for conditional and marginal R2 values
-pseudoR2.MCMCglmm <- function(mod, data) {
-  # Create model matrix using the MCMCglmm model and data objects
-  dt <- model.matrix(summary(mod)$fixed.formula, data=data)
-  
-  # Set logical condition to identify "Intercept" column in model matrix
-  cond <- grep("Intercept", colnames(dt))
-  
-  # If "Intercept" exists, then subset the remaining columns without dropping dimensions for a one-column matrix
-  if (sum(cond) > 0) {
-    dt <- dt[, -cond, drop = FALSE]
-  }
-  
-  # Identify variable names making sure they match the output
-  cols <- colnames(mod$Sol)
-  
-  # Subset mod$Sol to only columns matching those in model matrix
-  cond <- is.element(cols, colnames(dt))
-  sol <- mod$Sol[, cond, drop = FALSE]
-  
-  # Subset model matrix where colnames match colnames in mod$Sol
-  cond <- is.element(colnames(dt), cols)
-  dt <- dt[, cond, drop = FALSE]
-  
-  # Calculate the variance associated with the fixed effects
-  betas <- colMeans(sol)
-  xs <- t(dt) * betas
-  bx <- colSums(xs)
-  sigf <- var(bx)
-  
-  # Calculate the variance associated with the random effects
-  mod.vcv <- data.frame(mod$VCV[, 1:(ncol(mod$VCV) - 1)])
-  sigr <- sum(as.numeric(colMeans(mod.vcv)))
-  
-  # Calculate the variance associated with the residual effects
-  sige <- mean(mod$VCV[, "units"])
-  
-  # Marginal R² (variance explained by fixed factors)
-  r2m.i <- sigf / {sigf + sige + sigr}
-  
-  # Conditional R² (variance explained by the entire model)
-  r2c.i <- {sigf + sigr} / {sigf + sige + sigr}
-  
-  r2 <- c(marginal_R2 = r2m.i, conditional_R2 = r2c.i, 
-           variance_fixed = sigf, variance_random = sigr, 
-           variance_residual = sige)
-  
-  return(r2)
-}
-
-
 ```
 
 Cell Density Boxplot
@@ -2149,55 +2098,80 @@ Fv/Fm - percentage of larvae with symbiont cells
 ipam <- read.csv("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/Metadata_NingSpawn2024_iPAM.csv")
 str(ipam)
 
-#create treatment column
-ipam <- ipam %>%
-  mutate(TREATMENT = case_when(
-    TEMP == 27.5 ~ "T1",
-    TEMP == 31   ~ "T2",
-    TEMP == 35.5 ~ "T3",
-    TRUE         ~ NA_character_
-  ))
-
-#create uniqueID
-ipam <- ipam %>%
-  mutate(UniqueID = paste0(TREATMENT, "V", VIAL))
-
-#Add missing rows where FvFm is 0 to ensure 5 replicates per vial:
-#install.packages("stringr")
+library(dplyr)
+library(tidyr)
 library(stringr)
-
-ipam <- ipam %>%
-  group_by(UniqueID, TIMEPOINT) %>%
-  complete(REP = 1:5, fill = list(FvFm = 0)) %>%
-  ungroup() %>%
-  # Fill missing values for VIAL, TREATMENT, and UniqueID
-  mutate(
-    VIAL = ifelse(is.na(VIAL), as.integer(str_extract(UniqueID, "(?<=V)\\d+")), VIAL),
-    TREATMENT = ifelse(is.na(TREATMENT), str_extract(UniqueID, "^T\\d"), TREATMENT)
-  )
-
-#Add a 'Days' column based on the TIMEPOINT values: Map TIMEPOINT to the actual dates, then compute the difference in days:
-#install.packages("lubridate")  # Install if not installed
 library(lubridate)
 
 ipam <- ipam %>%
+  # Assign treatment labels
+  mutate(TREATMENT = case_when(
+    TEMP == 27.5 ~ "T1",
+    TEMP == 31 ~ "T2",
+    TEMP == 35.5 ~ "T3",
+    TRUE ~ NA_character_
+  )) %>%
+  # Create UniqueID
+  mutate(UniqueID = paste0(TREATMENT, "V", VIAL)) %>%
+  # Add missing REP rows per UniqueID × TIMEPOINT
+  group_by(UniqueID, TIMEPOINT) %>%
+  complete(REP = 1:5, fill = list(FvFm = 0)) %>%
+  # Fill metadata values downward and upward within group
+  fill(TEMP, SYMBIONT_TREATMENT, .direction = "downup") %>%
+  ungroup() %>%
+  # Recalculate VIAL from UniqueID if still missing
+  mutate(
+    VIAL = ifelse(is.na(VIAL), as.integer(str_extract(UniqueID, "(?<=V)\\d+")), VIAL),
+    TREATMENT = ifelse(is.na(TREATMENT), str_extract(UniqueID, "^T\\d"), TREATMENT)
+  ) %>%
+  # Add Dates for TIMEPOINTs
   mutate(
     Days = case_when(
       TIMEPOINT == 1 ~ as.Date("2024-04-11"),
       TIMEPOINT == 4 ~ as.Date("2024-04-14"),
       TIMEPOINT == 22 ~ as.Date("2024-05-02"),
-      TRUE ~ as.Date(NA)  # Use as.Date(NA) instead of NA_Date_
+      TRUE ~ as.Date(NA)
     )
   )
 
+# Load metadata summary
+perc_larvae_summary <- read.csv("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/perc_larvae_summary.csv")
 
-#Calculate the percentage of larvae with cells per vial: Assuming that FvFm > 0 indicates larvae with cells:
+# Make sure TIMEPOINT is the same type in both dataframes (numeric or integer)
+perc_larvae_summary <- perc_larvae_summary %>%
+  rename(TIMEPOINT = Days) %>%
+  rename(UniqueID = rep.ID)
+perc_larvae_summary$TIMEPOINT <- as.numeric(perc_larvae_summary$TIMEPOINT)
+ipam$TIMEPOINT <- as.numeric(ipam$TIMEPOINT)
+
+# Merge metadata
+ipam <- ipam %>%
+  left_join(perc_larvae_summary, by = c("UniqueID", "TIMEPOINT"))
+
+#Clean up
+ipam <- ipam %>%
+  dplyr::select(-POINT, -SYMBIONT_TREATMENT, -PAR, -AVERAGE_FvFm)
+
+#Calculate the percentage of larvae with cells per vial:
+epsilon <- 1e-8  # Avoid division by zero
+
+ipam <- ipam %>%
+  group_by(UniqueID) %>%
+  arrange(TIMEPOINT) %>%
+  mutate(
+    CellsInitial = first(na.omit(perc.larv)),
+    CellsFinal = last(na.omit(perc.larv)),
+    PercChangeCells = ((CellsFinal - CellsInitial))
+  ) %>%
+  ungroup()
+
+#Calculate the percentage of larvae with cells per vial for summary plot. Assuming that FvFm > 0 indicates larvae with cells:
 summary_df <- ipam %>%
   group_by(TIMEPOINT, TREATMENT) %>%
   summarize(PercentageWithCells = mean(FvFm > 0, na.rm = TRUE) * 100)
 
 #create figure
-ggplot(summary_df, aes(x = TIMEPOINT, y = PercentageWithCells, color = TREATMENT)) +
+ggplot(ipam, aes(x = TIMEPOINT, y = PercChangeCells, color = TREATMENT)) +
   geom_line(size = 1.2) +
   geom_point(size = 3) +
   labs(
@@ -4307,3 +4281,647 @@ ggsave("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Sp
        dpi = 300)           # Set the resolution (300 dpi is good for publications)  
 ```
 
+##Percentage of Larvae that Acquired Cells with Source Reef
+```{r}
+#Percentage with Cells ############################################
+
+# Ensure factors are ordered
+library(dplyr)
+
+ipam <- ipam %>%
+  mutate(
+    TEMP = case_when(
+      near(TEMP, 27.5) ~ "Ambient",
+      near(TEMP, 31) ~ "31",
+      near(TEMP, 35.5) ~ "35.5",
+      TRUE ~ as.character(TEMP)
+    ),
+    Reef = recode(Reef, "Bruboodjoo" = "CC", "Tantabiddi" = "WW"),
+    SymbiontTreatment = factor(zoox, levels = c("C", "D")),
+    Treatment = factor(TEMP, levels = c("Ambient", "31", "35.5")),
+    Cross = factor(Reef, levels = c("CC", "WW"))
+  )
+
+#df_subset$logChangeCells <- log(df_subset$PercChangeCells + 1)
+
+#check how many observations per group
+table(ipam$SymbiontTreatment, ipam$Cross, ipam$Treatment)
+
+#include replicates
+ipam <- ipam %>%
+  rename(Timepoint = TIMEPOINT)
+
+ipam <- ipam %>%
+  mutate(Timepoint = as.character(Timepoint)) %>%
+  left_join(
+    df_with_extremes %>%
+      mutate(Timepoint = as.character(Timepoint)) %>%
+      dplyr::select(UniqueID, Timepoint, Replicate) %>%
+      distinct(),
+    by = c("UniqueID", "Timepoint")
+  )
+
+summary(ipam[, c("PercChangeCells", "SymbiontTreatment", "Cross", "Treatment")])
+
+#set prior
+prior <- list(
+  R = list(V = 1, nu = 0.002),  # Residual variance (Gaussian default)
+  G = list(
+    G1 = list(V = 1, nu = 0.002)  # Random effect for Replicate
+  )
+)
+
+#model
+model_perc <- MCMCglmm(
+  PercChangeCells ~ SymbiontTreatment * Cross * Treatment,
+  random = ~ Replicate,
+  data = ipam,
+  family = "gaussian",
+  prior = prior,
+  nitt = 50000,
+  burnin = 10000,
+  thin = 20
+)
+
+summary(model_perc)
+
+#Check chain convergence and mixing
+library(coda)
+mcmc_obj <- as.mcmc(model_perc$Sol)
+plot(mcmc_obj)              # Trace and density plots
+autocorr.diag(mcmc_obj)     # Autocorrelation
+effectiveSize(mcmc_obj)     # Effective sample size
+
+newdat_perc <- expand.grid(
+  SymbiontTreatment = levels(ipam$SymbiontTreatment),
+  Cross = levels(ipam$Cross),
+  Treatment = levels(ipam$Treatment)  
+)
+
+newdat_perc$SymbiontTreatment <- factor(newdat_perc$SymbiontTreatment, levels = levels(ipam$SymbiontTreatment))
+newdat_perc$Cross <- factor(newdat_perc$Cross, levels = levels(ipam$Cross))
+newdat_perc$Treatment <- factor(newdat_perc$Treatment, levels = levels(ipam$Treatment))
+
+lapply(newdat_perc[, c("SymbiontTreatment", "Cross", "Treatment")], function(x) length(unique(x)))
+
+
+X_full_subset <- model.matrix(~ SymbiontTreatment * Cross * Treatment, data = newdat_perc)
+X_subset <- X_full_subset[, colnames(model_perc$Sol), drop = FALSE]
+
+pred_matrix_subset <- X_subset %*% t(model_perc$Sol)
+newdat_perc$pred_mean <- rowMeans(pred_matrix_subset)
+newdat_perc$lower <- apply(pred_matrix_subset, 1, quantile, probs = 0.025)
+newdat_perc$upper <- apply(pred_matrix_subset, 1, quantile, probs = 0.975)
+newdat_perc$significant <- !(newdat_perc$lower < 0 & newdat_perc$upper > 0)
+newdat_perc$label_combined <- paste0(round(newdat_perc$pred_mean, 2),
+                                       ifelse(newdat_perc$significant, "*", ""))
+
+ggplot(newdat_perc, aes(x = Treatment, y = Cross, fill = pred_mean)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = label_combined), color = "black", size = 4) +
+  facet_wrap(~ SymbiontTreatment) +
+  scale_fill_viridis_c(name = "Predicted cell change %") +
+  theme_minimal() +
+  labs(title = "Predicted Change in Cell Density (No 35.5)",
+       x = "Treatment", y = "Host Genotype")
+
+
+#############################
+### Modeling variables separate for each health metric to get relative contributions ###
+#PercChangeCells ~ SymbiontTreatment * Cross * Treatment
+
+# Load MCMCglmm if not already loaded
+library(MCMCglmm)
+
+# Your prior (make sure it's defined appropriately)
+# Example placeholder:
+prior <- list(R = list(V = 1, nu = 0.002), G = list(G1 = list(V = 1, nu = 0.002)))
+
+# Full model formula
+full_formula <- PercChangeCells ~ SymbiontTreatment * Cross * Treatment
+
+# Fit the full model
+model_full <- MCMCglmm(full_formula,
+  random = ~ Replicate,
+  data = ipam,
+  family = "gaussian",
+  prior = prior,
+  nitt = 50000,
+  burnin = 10000,
+  thin = 20
+)
+
+# Fit single fixed effect models
+mod_perc_Treatment <- MCMCglmm(PercChangeCells ~ Treatment, 
+                          random = ~ Replicate , 
+                          data = ipam, 
+                          family = "gaussian", 
+                          prior = prior, 
+                          nitt = 50000, 
+                          burnin = 10000, 
+                          thin = 20)
+
+mod_perc_symbiont <- MCMCglmm(PercChangeCells ~ SymbiontTreatment, 
+                         random = ~ Replicate , 
+                         data = ipam, 
+                         family = "gaussian", 
+                         prior = prior, 
+                         nitt = 50000, 
+                         burnin = 10000, 
+                         thin = 20)
+
+mod_perc_family <- MCMCglmm(PercChangeCells ~ Cross, 
+                       random = ~ Replicate , 
+                       data = ipam, 
+                       family = "gaussian", 
+                       prior = prior, 
+                       nitt = 50000, 
+                       burnin = 10000, 
+                       thin = 20)
+
+# Helper function to calculate marginal R²
+calc_marginal_R2 <- function(model, data, fixed_formula) {
+  # Build model matrix for fixed effects (includes intercept)
+  X <- model.matrix(fixed_formula, data = data)
+  
+  # Extract posterior samples of fixed effects
+  Sol <- model$Sol
+  
+  # Identify which columns in Sol correspond to fixed effects (including intercept)
+  fixed_effect_names <- colnames(Sol)
+  
+  # Align columns of X and Sol by name
+  # Remove any columns in X not present in Sol (unlikely, but safe)
+  cols_to_keep <- colnames(X) %in% fixed_effect_names
+  X_sub <- X[, cols_to_keep, drop = FALSE]
+  
+  # Subset Sol to columns matching X_sub
+  Sol_sub <- Sol[, colnames(X_sub), drop = FALSE]
+  
+  # Now dimensions should align for multiplication: X_sub (n x p), t(Sol_sub) (p x samples)
+  
+  if (ncol(X_sub) != ncol(Sol_sub)) {
+    stop("Mismatch between fixed effect columns in design matrix and posterior samples.")
+  }
+  
+  # Calculate linear predictor samples: each row = one observation,
+  # each column = one MCMC iteration sample
+  linpred_samples <- X_sub %*% t(Sol_sub)  # dimensions: nrow(X_sub) x nrow(Sol_sub)
+  
+  # Variance of predicted values for each MCMC iteration
+  var_fixed <- apply(linpred_samples, 2, var)
+  
+  # Variance components for random effects and residual
+  # Here, adjust grep pattern if you have multiple random effects or different names
+  var_random <- rowSums(model$VCV[, grep("Replicate", colnames(model$VCV)), drop = FALSE])
+  var_resid <- model$VCV[, "units"]
+  
+  # Marginal R² per iteration
+  R2_marginal <- var_fixed / (var_fixed + var_random + var_resid)
+  
+  # Return mean and 95% credible interval
+  c(
+    mean = mean(R2_marginal),
+    lower = quantile(R2_marginal, 0.025),
+    upper = quantile(R2_marginal, 0.975)
+  )
+}
+
+# Calculate marginal R2 for all models
+r2_full <- calc_marginal_R2(model_full, ipam, full_formula)
+r2_Treatment <- calc_marginal_R2(mod_perc_Treatment, ipam, PercChangeCells ~ Treatment)
+r2_symbiont <- calc_marginal_R2(mod_perc_symbiont, ipam, PercChangeCells ~ SymbiontTreatment)
+r2_cross2 <- calc_marginal_R2(mod_perc_family, ipam, PercChangeCells ~ Cross)
+
+# Print results
+cat("Marginal R² for full model (all fixed effects + interactions):\n")
+print(r2_full)
+cat("\nMarginal R² for Treatment only model:\n")
+print(r2_Treatment)
+cat("\nMarginal R² for SymbiontTreatment only model:\n")
+print(r2_symbiont)
+cat("\nMarginal R² for Cross only model:\n")
+print(r2_cross2)
+
+
+calc_marginal_conditional_R2 <- function(model, data, fixed_formula) {
+  X <- model.matrix(fixed_formula, data = data)
+  Sol <- model$Sol
+  
+  cols_to_keep <- colnames(X) %in% colnames(Sol)
+  X_sub <- X[, cols_to_keep, drop = FALSE]
+  Sol_sub <- Sol[, colnames(X_sub), drop = FALSE]
+  
+  if (ncol(X_sub) != ncol(Sol_sub)) stop("Mismatch in fixed effect columns.")
+  
+  linpred_samples <- X_sub %*% t(Sol_sub)
+  var_fixed <- apply(linpred_samples, 2, var)
+  
+  var_random <- rowSums(model$VCV[, grep("Replicate", colnames(model$VCV)), drop = FALSE])
+  var_resid <- model$VCV[, "units"]
+  
+  R2_marginal <- var_fixed / (var_fixed + var_random + var_resid)
+  R2_conditional <- (var_fixed + var_random) / (var_fixed + var_random + var_resid)
+  
+  result <- rbind(
+    marginal = c(mean = mean(R2_marginal), lower = quantile(R2_marginal, 0.025), upper = quantile(R2_marginal, 0.975)),
+    conditional = c(mean = mean(R2_conditional), lower = quantile(R2_conditional, 0.025), upper = quantile(R2_conditional, 0.975))
+  )
+  
+  print(result)  # <--- add this line for debugging
+  return(result)
+}
+
+
+library(ggplot2)
+
+# Calculate and store results once
+r2_full <- calc_marginal_conditional_R2(model_full, ipam, full_formula)
+r2_Treatment <- calc_marginal_conditional_R2(mod_perc_Treatment, ipam, PercChangeCells ~ Treatment)
+r2_symbiont <- calc_marginal_conditional_R2(mod_perc_symbiont, ipam, PercChangeCells ~ SymbiontTreatment)
+r2_cross2 <- calc_marginal_conditional_R2(mod_perc_family, ipam, PercChangeCells ~ Cross)
+
+# Check if they have the expected rownames
+print(rownames(r2_full))      # Should be: "marginal" "conditional"
+print(rownames(r2_Treatment)) # Same
+print(rownames(r2_symbiont))  # Same
+print(rownames(r2_cross2))    # Same
+
+colnames(r2_full) <- c("mean", "lower", "upper")
+colnames(r2_Treatment) <- c("mean", "lower", "upper")
+colnames(r2_symbiont) <- c("mean", "lower", "upper")
+colnames(r2_cross2) <- c("mean", "lower", "upper")
+
+# Now build the dataframe using the stored results
+results_df <- data.frame(
+  Effect = c("Full Model", "Treatment", "SymbiontTreatment", "Cross"),
+
+  Marginal_Mean = c(
+    r2_full["marginal", "mean"],
+    r2_Treatment["marginal", "mean"],
+    r2_symbiont["marginal", "mean"],
+    r2_cross2["marginal", "mean"]
+  ),
+  Marginal_Lower = c(
+    r2_full["marginal", "lower"],
+    r2_Treatment["marginal", "lower"],
+    r2_symbiont["marginal", "lower"],
+    r2_cross2["marginal", "lower"]
+  ),
+  Marginal_Upper = c(
+    r2_full["marginal", "upper"],
+    r2_Treatment["marginal", "upper"],
+    r2_symbiont["marginal", "upper"],
+    r2_cross2["marginal", "upper"]
+  ),
+
+  Conditional_Mean = c(
+    r2_full["conditional", "mean"],
+    r2_Treatment["conditional", "mean"],
+    r2_symbiont["conditional", "mean"],
+    r2_cross2["conditional", "mean"]
+  ),
+  Conditional_Lower = c(
+    r2_full["conditional", "lower"],
+    r2_Treatment["conditional", "lower"],
+    r2_symbiont["conditional", "lower"],
+    r2_cross2["conditional", "lower"]
+  ),
+  Conditional_Upper = c(
+    r2_full["conditional", "upper"],
+    r2_Treatment["conditional", "upper"],
+    r2_symbiont["conditional", "upper"],
+    r2_cross2["conditional", "upper"]
+  )
+)
+
+print(results_df)
+
+
+# Calculate relative contributions based on Marginal R² Mean
+results_df$Relative_Contribution <- results_df$Marginal_Mean / results_df$Marginal_Mean[results_df$Effect == "Full Model"]
+results_df$Relative_Contribution_Percent <- round(100 * results_df$Relative_Contribution, 1)
+
+# Display selected columns, including Conditional R²
+summary_df <- results_df[, c("Effect", 
+                             "Marginal_Mean", 
+                             "Conditional_Mean", 
+                             "Relative_Contribution_Percent")]
+
+# Print
+print(summary_df)
+```
+
+##ONLY SURVIVORS: Percentage of Larvae that Acquired Cells with Source Cross
+```{r}
+#Percentage with Cells ############################################
+
+# Step 1: Get UniqueIDs present at Timepoint 22
+ids_at_22 <- ipam %>%
+  filter(Timepoint == 22) %>%
+  pull(UniqueID) %>%
+  unique()
+
+# Step 2: Subset ipam to include only those UniqueIDs
+ipam_subset <- ipam %>%
+  filter(UniqueID %in% ids_at_22)
+
+# Ensure factors are ordered
+ipam_subset$Treatment <- factor(ipam_subset$Treatment, 
+                                     levels = c("27.5", "31", "35.5"))
+ipam_subset$Cross <- factor(ipam_subset$Cross, 
+                                     levels = c("Bruboodjoo", "Tantabiddi"))
+ipam_subset$SymbiontTreatment <- factor(ipam_subset$SymbiontTreatment, 
+                                     levels = c("C", "D"))
+
+#check how many observations per group
+table(ipam_subset$SymbiontTreatment, ipam_subset$Cross, ipam_subset$Treatment)
+
+#set prior
+prior <- list(
+  R = list(V = 1, nu = 0.002),  # Residual variance (Gaussian default)
+  G = list(
+    G1 = list(V = 1, nu = 0.002)  # Random effect for Replicate
+  )
+)
+
+#model
+model_perc <- MCMCglmm(
+  PercChangeCells ~ SymbiontTreatment * Cross * Treatment,
+  random = ~ Replicate,
+  data = ipam_subset,
+  family = "gaussian",
+  prior = prior,
+  nitt = 50000,
+  burnin = 10000,
+  thin = 20
+)
+
+summary(model_perc)
+
+#Check chain convergence and mixing
+library(coda)
+mcmc_obj <- as.mcmc(model_perc$Sol)
+plot(mcmc_obj)              # Trace and density plots
+autocorr.diag(mcmc_obj)     # Autocorrelation
+effectiveSize(mcmc_obj)     # Effective sample size
+
+newdat_perc2 <- expand.grid(
+  SymbiontTreatment = levels(ipam_subset$SymbiontTreatment),
+  Cross = levels(ipam_subset$Cross),
+  Treatment = levels(ipam_subset$Treatment)  
+)
+
+newdat_perc2$SymbiontTreatment <- factor(newdat_perc2$SymbiontTreatment, levels = levels(ipam_subset$SymbiontTreatment))
+newdat_perc2$Cross <- factor(newdat_perc2$Cross, levels = levels(ipam_subset$Cross))
+newdat_perc2$Treatment <- factor(newdat_perc2$Treatment, levels = levels(ipam_subset$Treatment))
+
+lapply(newdat_perc2[, c("SymbiontTreatment", "Cross", "Treatment")], function(x) length(unique(x)))
+
+
+X_full_subset <- model.matrix(~ SymbiontTreatment * Cross * Treatment, data = newdat_perc2)
+X_subset <- X_full_subset[, colnames(model_perc$Sol), drop = FALSE]
+
+pred_matrix_subset <- X_subset %*% t(model_perc$Sol)
+newdat_perc2$pred_mean <- rowMeans(pred_matrix_subset)
+newdat_perc2$lower <- apply(pred_matrix_subset, 1, quantile, probs = 0.025)
+newdat_perc2$upper <- apply(pred_matrix_subset, 1, quantile, probs = 0.975)
+newdat_perc2$significant <- !(newdat_perc2$lower < 0 & newdat_perc2$upper > 0)
+newdat_perc2$label_combined <- paste0(round(newdat_perc2$pred_mean, 2),
+                                       ifelse(newdat_perc2$significant, "*", ""))
+
+ggplot(newdat_perc2, aes(x = Treatment, y = Cross, fill = pred_mean)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = label_combined), color = "black", size = 4) +
+  facet_wrap(~ SymbiontTreatment) +
+  scale_fill_viridis_c(name = "Predicted cell change %") +
+  theme_minimal() +
+  labs(title = "Predicted Change in Cell Density (No 35.5)",
+       x = "Treatment", y = "Host Genotype")
+
+
+#############################
+### Modeling variables separate for each health metric to get relative contributions ###
+#PercChangeCells ~ SymbiontTreatment * Cross * Treatment
+
+# Load MCMCglmm if not already loaded
+library(MCMCglmm)
+
+# Your prior (make sure it's defined appropriately)
+# Example placeholder:
+prior <- list(R = list(V = 1, nu = 0.002), G = list(G1 = list(V = 1, nu = 0.002)))
+
+# Full model formula
+full_formula <- PercChangeCells ~ SymbiontTreatment * Cross * Treatment
+
+# Fit the full model
+model_full <- MCMCglmm(full_formula,
+  random = ~ Replicate,
+  data = ipam_subset,
+  family = "gaussian",
+  prior = prior,
+  nitt = 50000,
+  burnin = 10000,
+  thin = 20
+)
+
+# Fit single fixed effect models
+mod_perc_Treatment <- MCMCglmm(PercChangeCells ~ Treatment, 
+                          random = ~ Replicate , 
+                          data = ipam_subset, 
+                          family = "gaussian", 
+                          prior = prior, 
+                          nitt = 50000, 
+                          burnin = 10000, 
+                          thin = 20)
+
+mod_perc_symbiont <- MCMCglmm(PercChangeCells ~ SymbiontTreatment, 
+                         random = ~ Replicate , 
+                         data = ipam_subset, 
+                         family = "gaussian", 
+                         prior = prior, 
+                         nitt = 50000, 
+                         burnin = 10000, 
+                         thin = 20)
+
+mod_perc_family <- MCMCglmm(PercChangeCells ~ Cross, 
+                       random = ~ Replicate , 
+                       data = ipam_subset, 
+                       family = "gaussian", 
+                       prior = prior, 
+                       nitt = 50000, 
+                       burnin = 10000, 
+                       thin = 20)
+
+# Helper function to calculate marginal R²
+calc_marginal_R2 <- function(model, data, fixed_formula) {
+  # Build model matrix for fixed effects (includes intercept)
+  X <- model.matrix(fixed_formula, data = data)
+  
+  # Extract posterior samples of fixed effects
+  Sol <- model$Sol
+  
+  # Identify which columns in Sol correspond to fixed effects (including intercept)
+  fixed_effect_names <- colnames(Sol)
+  
+  # Align columns of X and Sol by name
+  # Remove any columns in X not present in Sol (unlikely, but safe)
+  cols_to_keep <- colnames(X) %in% fixed_effect_names
+  X_sub <- X[, cols_to_keep, drop = FALSE]
+  
+  # Subset Sol to columns matching X_sub
+  Sol_sub <- Sol[, colnames(X_sub), drop = FALSE]
+  
+  # Now dimensions should align for multiplication: X_sub (n x p), t(Sol_sub) (p x samples)
+  
+  if (ncol(X_sub) != ncol(Sol_sub)) {
+    stop("Mismatch between fixed effect columns in design matrix and posterior samples.")
+  }
+  
+  # Calculate linear predictor samples: each row = one observation,
+  # each column = one MCMC iteration sample
+  linpred_samples <- X_sub %*% t(Sol_sub)  # dimensions: nrow(X_sub) x nrow(Sol_sub)
+  
+  # Variance of predicted values for each MCMC iteration
+  var_fixed <- apply(linpred_samples, 2, var)
+  
+  # Variance components for random effects and residual
+  # Here, adjust grep pattern if you have multiple random effects or different names
+  var_random <- rowSums(model$VCV[, grep("Replicate", colnames(model$VCV)), drop = FALSE])
+  var_resid <- model$VCV[, "units"]
+  
+  # Marginal R² per iteration
+  R2_marginal <- var_fixed / (var_fixed + var_random + var_resid)
+  
+  # Return mean and 95% credible interval
+  c(
+    mean = mean(R2_marginal),
+    lower = quantile(R2_marginal, 0.025),
+    upper = quantile(R2_marginal, 0.975)
+  )
+}
+
+# Calculate marginal R2 for all models
+r2_full <- calc_marginal_R2(model_full, ipam_subset, full_formula)
+r2_Treatment <- calc_marginal_R2(mod_perc_Treatment, ipam_subset, PercChangeCells ~ Treatment)
+r2_symbiont <- calc_marginal_R2(mod_perc_symbiont, ipam_subset, PercChangeCells ~ SymbiontTreatment)
+r2_cross2 <- calc_marginal_R2(mod_perc_family, ipam_subset, PercChangeCells ~ Cross)
+
+# Print results
+cat("Marginal R² for full model (all fixed effects + interactions):\n")
+print(r2_full)
+cat("\nMarginal R² for Treatment only model:\n")
+print(r2_Treatment)
+cat("\nMarginal R² for SymbiontTreatment only model:\n")
+print(r2_symbiont)
+cat("\nMarginal R² for Cross only model:\n")
+print(r2_cross2)
+
+
+calc_marginal_conditional_R2 <- function(model, data, fixed_formula) {
+  X <- model.matrix(fixed_formula, data = data)
+  Sol <- model$Sol
+  
+  cols_to_keep <- colnames(X) %in% colnames(Sol)
+  X_sub <- X[, cols_to_keep, drop = FALSE]
+  Sol_sub <- Sol[, colnames(X_sub), drop = FALSE]
+  
+  if (ncol(X_sub) != ncol(Sol_sub)) stop("Mismatch in fixed effect columns.")
+  
+  linpred_samples <- X_sub %*% t(Sol_sub)
+  var_fixed <- apply(linpred_samples, 2, var)
+  
+  var_random <- rowSums(model$VCV[, grep("Replicate", colnames(model$VCV)), drop = FALSE])
+  var_resid <- model$VCV[, "units"]
+  
+  R2_marginal <- var_fixed / (var_fixed + var_random + var_resid)
+  R2_conditional <- (var_fixed + var_random) / (var_fixed + var_random + var_resid)
+  
+  result <- rbind(
+    marginal = c(mean = mean(R2_marginal), lower = quantile(R2_marginal, 0.025), upper = quantile(R2_marginal, 0.975)),
+    conditional = c(mean = mean(R2_conditional), lower = quantile(R2_conditional, 0.025), upper = quantile(R2_conditional, 0.975))
+  )
+  
+  print(result)  # <--- add this line for debugging
+  return(result)
+}
+
+
+library(ggplot2)
+
+# Calculate and store results once
+r2_full <- calc_marginal_conditional_R2(model_full, ipam_subset, full_formula)
+r2_Treatment <- calc_marginal_conditional_R2(mod_perc_Treatment, ipam_subset, PercChangeCells ~ Treatment)
+r2_symbiont <- calc_marginal_conditional_R2(mod_perc_symbiont, ipam_subset, PercChangeCells ~ SymbiontTreatment)
+r2_cross2 <- calc_marginal_conditional_R2(mod_perc_family, ipam_subset, PercChangeCells ~ Cross)
+
+# Check if they have the expected rownames
+print(rownames(r2_full))      # Should be: "marginal" "conditional"
+print(rownames(r2_Treatment)) # Same
+print(rownames(r2_symbiont))  # Same
+print(rownames(r2_cross2))    # Same
+
+colnames(r2_full) <- c("mean", "lower", "upper")
+colnames(r2_Treatment) <- c("mean", "lower", "upper")
+colnames(r2_symbiont) <- c("mean", "lower", "upper")
+colnames(r2_cross2) <- c("mean", "lower", "upper")
+
+# Now build the dataframe using the stored results
+results_df <- data.frame(
+  Effect = c("Full Model", "Treatment", "SymbiontTreatment", "Cross"),
+
+  Marginal_Mean = c(
+    r2_full["marginal", "mean"],
+    r2_Treatment["marginal", "mean"],
+    r2_symbiont["marginal", "mean"],
+    r2_cross2["marginal", "mean"]
+  ),
+  Marginal_Lower = c(
+    r2_full["marginal", "lower"],
+    r2_Treatment["marginal", "lower"],
+    r2_symbiont["marginal", "lower"],
+    r2_cross2["marginal", "lower"]
+  ),
+  Marginal_Upper = c(
+    r2_full["marginal", "upper"],
+    r2_Treatment["marginal", "upper"],
+    r2_symbiont["marginal", "upper"],
+    r2_cross2["marginal", "upper"]
+  ),
+
+  Conditional_Mean = c(
+    r2_full["conditional", "mean"],
+    r2_Treatment["conditional", "mean"],
+    r2_symbiont["conditional", "mean"],
+    r2_cross2["conditional", "mean"]
+  ),
+  Conditional_Lower = c(
+    r2_full["conditional", "lower"],
+    r2_Treatment["conditional", "lower"],
+    r2_symbiont["conditional", "lower"],
+    r2_cross2["conditional", "lower"]
+  ),
+  Conditional_Upper = c(
+    r2_full["conditional", "upper"],
+    r2_Treatment["conditional", "upper"],
+    r2_symbiont["conditional", "upper"],
+    r2_cross2["conditional", "upper"]
+  )
+)
+
+print(results_df)
+
+
+# Calculate relative contributions based on Marginal R² Mean
+results_df$Relative_Contribution <- results_df$Marginal_Mean / results_df$Marginal_Mean[results_df$Effect == "Full Model"]
+results_df$Relative_Contribution_Percent <- round(100 * results_df$Relative_Contribution, 1)
+
+# Display selected columns, including Conditional R²
+summary_df <- results_df[, c("Effect", 
+                             "Marginal_Mean", 
+                             "Conditional_Mean", 
+                             "Relative_Contribution_Percent")]
+
+# Print
+print(summary_df)
+```
