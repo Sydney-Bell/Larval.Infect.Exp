@@ -4375,6 +4375,43 @@ newdat_perc$upper <- apply(pred_matrix_subset, 1, quantile, probs = 0.975)
 newdat_perc$significant <- !(newdat_perc$lower < 0 & newdat_perc$upper > 0)
 newdat_perc$label_combined <- paste0(round(newdat_perc$pred_mean, 2),
                                        ifelse(newdat_perc$significant, "*", ""))
+# Calculate pMCMC values: two-tailed test for each posterior distribution
+newdat_perc$pMCMC <- apply(pred_matrix_subset, 1, function(x) {
+  2 * min(mean(x > 0), mean(x < 0))
+})
+
+#Global mean
+# Vector of posterior means across all groups for each MCMC iteration
+global_mean_post_subset <- colMeans(pred_matrix_subset)
+# Difference: each group's posterior - global mean at each MCMC iteration
+diff_matrix_global_subset <- sweep(pred_matrix_subset, 2, global_mean_post_subset, FUN = "-")
+# pMCMC: two-tailed probability that the difference ≠ 0
+pMCMC_vals <- apply(diff_matrix_global_subset, 1, function(x) {
+  mean(x < 0) * 2 * (mean(x < 0) < 0.5) + mean(x > 0) * 2 * (mean(x > 0) < 0.5)
+})
+diff_summary_global_subset <- as.data.frame(t(apply(diff_matrix_global_subset, 1, function(x) {
+  q <- quantile(x, probs = c(0.025, 0.975))
+  c(mean_diff = mean(x), lower = q[1], upper = q[2])
+})))
+
+colnames(diff_summary_global_subset) <- c("mean_global", "lower_global", "upper_global")
+
+diff_summary_global_subset$pMCMC <- pMCMC_vals
+diff_summary_global_subset$signif_label_global <- case_when(
+  pMCMC_vals < 0.005 ~ "**",
+  pMCMC_vals < 0.05  ~ "*",
+  TRUE               ~ ""
+)
+
+diff_summary_global_subset$label_combined_global <- paste0(
+  round(diff_summary_global_subset$mean_global, 2),
+  diff_summary_global_subset$signif_label_global
+)
+
+diff_summary_global_subset <- as.data.frame(diff_summary_global_subset)
+diff_summary_global_subset$significant_vs_global <- with(diff_summary_global_subset, lower_global > 0 | upper_global < 0)
+
+newdat_perc <- cbind(newdat_perc, diff_summary_global_subset)
 
 ggplot(newdat_perc, aes(x = Treatment, y = Cross, fill = pred_mean)) +
   geom_tile(color = "white") +
