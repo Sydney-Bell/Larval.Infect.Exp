@@ -1658,14 +1658,14 @@ library(ggplot2)
 library(dplyr)
 
 # Filter for alive samples, specific timepoints, and summarize data
-df_summary <- df_clean %>%
-  filter(Alive..Dead..Sampled == "Alive", 
+df_summary <- totaldf_long %>%
+  filter(Status == "0", 
          Timepoint %in% c(1, 4, 22), 
-         !is.na(PAM.EffectiveQuant.)) %>%
+         !is.na(FvFm)) %>%
   group_by(Timepoint, Treatment) %>%
   summarise(
-    mean_FvFm = mean(PAM.EffectiveQuant., na.rm = TRUE),
-    se_FvFm = sd(PAM.EffectiveQuant., na.rm = TRUE) / sqrt(n()),
+    mean_FvFm = mean(FvFm, na.rm = TRUE),
+    se_FvFm = sd(FvFm, na.rm = TRUE) / sqrt(n()),
     .groups = 'drop'
   )
 
@@ -1687,13 +1687,13 @@ library(ggplot2)
 library(dplyr)
 
 # Filter for alive samples and specific timepoints, and count samples over 0.35
-df_count <- df_clean %>%
-  filter(Alive..Dead..Sampled == "Alive", 
+df_count <- totaldf_long %>%
+  filter(Status == "0", 
          Timepoint %in% c(1, 4, 22), 
-         !is.na(PAM.EffectiveQuant.)) %>%
+         !is.na(FvFm)) %>%
   group_by(Timepoint, Treatment) %>%
   summarise(
-    count_over_35 = sum(PAM.EffectiveQuant. > 0.5, na.rm = TRUE),
+    count_over_35 = sum(FvFm > 0.5, na.rm = TRUE),
     .groups = 'drop'
   )
 
@@ -2095,7 +2095,7 @@ print(r2_values.FvFmfam2)
 Fv/Fm - percentage of larvae with symbiont cells
 
 ```{r}
-ipam <- read.csv("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/Metadata_NingSpawn2024_iPAM.csv")
+ipam <- read.csv("C:/Users/bellb/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/Metadata_NingSpawn2024_iPAM.csv")
 str(ipam)
 
 library(dplyr)
@@ -2135,7 +2135,7 @@ ipam <- ipam %>%
   )
 
 # Load metadata summary
-perc_larvae_summary <- read.csv("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/perc_larvae_summary.csv")
+perc_larvae_summary <- read.csv("C:/Users/bellb/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/perc_larvae_summary.csv")
 
 # Make sure TIMEPOINT is the same type in both dataframes (numeric or integer)
 perc_larvae_summary <- perc_larvae_summary %>%
@@ -2190,12 +2190,12 @@ ggplot(ipam, aes(x = TIMEPOINT, y = PercChangeCells, color = TREATMENT)) +
 #Now we want to view differences in symbiont taxa
 # Subset df_clean to UniqueID and SymbiontTreatment and remove duplicates
 df_clean_subset <- totaldf_long %>%
-  select(UniqueID, SymbiontTreatment, ReefMom) %>%
+  dplyr::select(UniqueID, SymbiontTreatment, ReefMom) %>%
   distinct(UniqueID, .keep_all = TRUE)
 
 # Merge the SymbiontTreatment column from df_clean to ipam by UniqueID
 ipam_taxa <- ipam %>%
-  left_join(df_clean_subset %>% select(UniqueID, SymbiontTreatment), by = "UniqueID")
+  left_join(df_clean_subset %>% dplyr::select(UniqueID, SymbiontTreatment), by = "UniqueID")
 
 # Summarize data to include SymbiontTreatment
 summary_df2 <- ipam_taxa %>%
@@ -2216,7 +2216,7 @@ date_to_day <- c(
 
 # Add a new column to map `Days` to the corresponding numeric day
 summary_df2 <- summary_df2 %>%
-  mutate(DayNumber = as.numeric(date_to_day[as.character(Days)]))  # Map dates to days
+  mutate(DayNumber = as.numeric(date_to_day[as.character(TIMEPOINT)]))  # Map dates to days
 
 # Plot with updated x-axis and custom colors
 ggplot(summary_df2, aes(x = DayNumber, y = PercentageWithCells, color = SymbiontTreatment)) +
@@ -2273,7 +2273,7 @@ filtered_ipam <- ipam %>%
 
 # Step 3: Merge SymbiontTreatment for surviving larvae
 filtered_ipam <- filtered_ipam %>%
-  left_join(df_clean_subset %>% select(UniqueID, SymbiontTreatment, ReefMom), by = "UniqueID")
+  left_join(df_clean_subset %>% dplyr::select(UniqueID, SymbiontTreatment, ReefMom), by = "UniqueID")
 
 # Step 4: Create the summary dataframe for larvae that survived until timepoint 22
 ipam_taxa_survived <- filtered_ipam %>%
@@ -2281,11 +2281,11 @@ ipam_taxa_survived <- filtered_ipam %>%
   summarize(PercentageWithCells = mean(FvFm > 0, na.rm = TRUE) * 100, .groups = "drop")
 
 # Step 6: Map days to numeric day values
-summary_df2_survived <- summary_df2_survived %>%
-  mutate(DayNumber = as.numeric(date_to_day[as.character(Days)]))
+summary_df2_survived <- ipam_taxa_survived %>%
+  mutate(DayNumber = as.numeric(date_to_day[as.character(TIMEPOINT)]))
 
 # Step 7: Plot the data for only larvae that survived until timepoint 22 and have data for all three timepoints
-ggplot(ipam_taxa_survived, aes(x = TIMEPOINT, y = PercentageWithCells,
+ggplot(summary_df2_survived, aes(x = TIMEPOINT, y = PercentageWithCells,
                                color = ReefMom, shape = SymbiontTreatment)) +
   geom_point(alpha = 0.6, size = 2) +  # Scatter plot
   geom_line(aes(group = interaction(ReefMom, SymbiontTreatment)), alpha = 0.6) +  # Line connecting points
@@ -2329,7 +2329,7 @@ ggplot(summary_stats, aes(x = TIMEPOINT, y = mean_pct, color = SymbiontTreatment
   geom_line(aes(group = SymbiontTreatment), size = 1) +
   geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper, group = SymbiontTreatment), width = 0.3) +
   facet_grid(ReefMom ~ TREATMENT) +
-  scale_color_manual(values = c("C" = "blue", "D" = "red")) +  # adjust colors as you want
+  scale_color_manual(values = c("C" = "#1f77b4", "D" = "#ff7f0e")) +  # adjust colors as you want
   labs(
     title = "Percentage of Larvae with Cells Over Time",
     x = "Days",
@@ -2363,7 +2363,7 @@ plot1_perc <- ggplot(summary_stats, aes(x = TIMEPOINT, y = mean_pct, color = Cro
   geom_line(aes(group = SymbiontTreatment), size = 1) +
   geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper, group = SymbiontTreatment), width = 0.3) +
   facet_grid(Cross ~ TREATMENT) +
-  scale_color_manual(values = c("CC" = "blue", "WW" = "red")) +
+  scale_color_manual(values = c("CC" = "#1f77b4", "WW" = "#ff7f0e")) +
   labs(
     title = "Percentage of Larvae with Cells Over Time",
     x = "Days",
@@ -2970,45 +2970,47 @@ final_timepoint_df <- df_clean %>%
   summarise(mean_area = mean(Area..mm.2., na.rm = TRUE),
             se_area = sd(Area..mm.2., na.rm = TRUE) / sqrt(n()))
 
-# Reorder the Treatment factor in the desired order
-final_timepoint_df <- final_timepoint_df %>%
-  mutate(Treatment = factor(Treatment, levels = c("Ambient", "31", "35.5")))
+all_combos <- expand.grid(
+  Treatment = c("Ambient", "31", "35.5"),
+  Cross_2 = unique(df_clean$Cross_2),
+  SymbiontTreatment = unique(df_clean$SymbiontTreatment),
+  stringsAsFactors = FALSE
+)
+
+final_timepoint_df_full <- all_combos %>%
+  left_join(final_timepoint_df, by = c("Treatment", "Cross_2", "SymbiontTreatment")) %>%
+  mutate(
+    mean_area = ifelse(is.na(mean_area), 0, mean_area),
+    se_area = ifelse(is.na(se_area), 0, se_area),
+    Treatment = factor(Treatment, levels = c("Ambient", "31", "35.5"))  # Re-set factor levels
+  )
 
 # Define a custom color palette
-custom_colors <- c("BxB" = "#1f77b4", "TxT" = "#ff7f0e") # Modify colors as needed
+custom_colors <- c("CC" = "#1f77b4", "WW" = "#ff7f0e") # Modify colors as needed
 
 # Plot the mean area with error bars and custom colors
-area_plot <- ggplot(final_timepoint_df, aes(x = Treatment, y = mean_area, 
-                               color = Cross_2, shape = SymbiontTreatment)) +
-  geom_point(size = 4) +
-  geom_errorbar(aes(ymin = mean_area - se_area, ymax = mean_area + se_area), 
+area_plot <- ggplot(final_timepoint_df, aes(x = Treatment, y = mean_area)) +
+  geom_point(aes(fill = Cross_2, shape = SymbiontTreatment), 
+             color = "black", size = 4, stroke = 1.5) +  # black border around points
+  geom_errorbar(aes(ymin = mean_area - se_area, ymax = mean_area + se_area, 
+                    color = Cross_2), 
                 width = 0.2) +
-  scale_color_manual(values = custom_colors) +  # Apply the custom color palette
-  labs(x = "Temperature (Treatment)", y = "Mean Area (mm² ± s.e.)",
-       title = "Mean Larval Area at Final Timepoint (22)") +
-  theme_minimal() +
-  theme(legend.position = "right")
-
-area_plot
-
-# Updated area_plot with only x and y axis lines, no grid lines, and a dashed line at y = 0
-area_plot <- ggplot(final_timepoint_df, aes(x = Treatment, y = mean_area, 
-                                            color = Cross_2, shape = SymbiontTreatment)) +
-  geom_point(size = 4) +
-  geom_errorbar(aes(ymin = mean_area - se_area, ymax = mean_area + se_area), 
-                width = 0.2) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +  # Add dashed line at y = 0
-  scale_color_manual(values = custom_colors) +  # Apply the custom color palette
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +
+  scale_fill_manual(values = custom_colors) +
+  scale_color_manual(values = custom_colors) +
+  scale_shape_manual(values = c(21, 24)) +  # use shapes that support fill (adjust as needed)
   labs(x = "Temperature Treatment", y = "Mean Area (mm² ± s.e.)",
        title = "Mean Larval Area at Final Timepoint (22)") +
   theme_minimal() +
   theme(
     legend.position = "right",
-    panel.grid.major = element_blank(),  # Remove major grid lines
-    panel.grid.minor = element_blank(),  # Remove minor grid lines
-    axis.line = element_line(color = "black"),  # Keep x and y axis lines
-    axis.ticks = element_line(color = "black")  # Add axis ticks
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black"),
+    axis.ticks = element_line(color = "black")
   )
+
+
 
 # Display the plot
 print(area_plot)
@@ -3085,60 +3087,55 @@ ggsave("combined_plot_mean_area_inset.png", plot = combined_plot_mean_area, widt
 Plot of percent change in size
 
 ```{r}
-# Extract the area at Timepoint 1
-area_t1 <- df_clean %>%
-  filter(Timepoint == 1) %>%
-  select(UniqueID, Area..mm.2.) %>%
-  rename(SizeT1 = Area..mm.2.)
-
-# Extract the area at Timepoint 22
-area_t22 <- df_clean %>%
-  filter(Timepoint == 22) %>%
-  select(UniqueID, Area..mm.2.) %>%
-  rename(SizeT22 = Area..mm.2.)
-
-# Merge SizeT1 and SizeT22 back into the main dataframe
-df_clean <- df_clean %>%
-  left_join(area_t1, by = "UniqueID", relationship = "many-to-many") %>%
-  left_join(area_t22, by = "UniqueID", relationship = "many-to-many")
-
-# Calculate Percent Change in Area between Timepoint 1 and Timepoint 22
-df_clean <- df_clean %>%
-  mutate(PercChangeArea = ((SizeT22 - SizeT1) / SizeT1) * 100)
-
-# Now df_clean has a new column 'PercChangeArea' representing the percent change in area between Timepoint 1 and Timepoint 22
 
 # Group by Treatment, Cross_2, and SymbiontTreatment, and calculate mean and standard error for percent change
-perc_change_summary <- df_clean %>%
+perc_change_summary <- totaldf_long %>%
+  filter(Timepoint == 22, Status == 0) %>%
   group_by(Treatment, Cross_2, SymbiontTreatment) %>%
-  summarise(mean_perc_change = mean(PercChangeArea, na.rm = TRUE),
-            se_perc_change = sd(PercChangeArea, na.rm = TRUE) / sqrt(n()))
+  summarise(mean_perc_change = mean(PercChangeSize, na.rm = TRUE),
+            se_perc_change = sd(PercChangeSize, na.rm = TRUE) / sqrt(n()))
 
-# Reorder the Treatment factor in the desired order
-perc_change_summary <- perc_change_summary %>%
-  mutate(Treatment = factor(Treatment, levels = c("Ambient", "31", "35.5")))
+all_combos <- expand.grid(
+  Treatment = c("Ambient", "31", "35.5"),
+  Cross_2 = unique(totaldf_long$Cross_2),
+  SymbiontTreatment = unique(totaldf_long$SymbiontTreatment),
+  stringsAsFactors = FALSE
+)
+
+perc_change_summary <- all_combos %>%
+  left_join(perc_change_summary, by = c("Treatment", "Cross_2", "SymbiontTreatment")) %>%
+  mutate(
+    mean_area = ifelse(is.na(mean_perc_change), 0, mean_perc_change),
+    se_area = ifelse(is.na(se_perc_change), 0, se_perc_change),
+    Treatment = factor(Treatment, levels = c("Ambient", "31", "35.5"))  # Re-set factor levels
+  )
 
 # Define a custom color palette (same as before)
-custom_colors <- c("BxB" = "#1f77b4", "TxT" = "#ff7f0e")  # Modify colors as needed
+custom_colors <- c("CC" = "#1f77b4", "WW" = "#ff7f0e")  # Modify colors as needed
 
 # Plot the percent change in area with error bars and custom colors
 perc_change_plot <- ggplot(perc_change_summary, aes(x = Treatment, y = mean_perc_change, 
-                                                    color = Cross_2, shape = SymbiontTreatment)) +
-  geom_point(size = 4) +
-  geom_errorbar(aes(ymin = mean_perc_change - se_perc_change, ymax = mean_perc_change + se_perc_change), 
+                                                    fill = Cross_2, shape = SymbiontTreatment)) +
+  geom_point(size = 4, color = "black", stroke = 1.5) +  # Point border is black
+  geom_errorbar(aes(ymin = mean_perc_change - se_perc_change,
+                    ymax = mean_perc_change + se_perc_change,
+                    color = Cross_2),  # Match error bars to fill color
                 width = 0.2) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +  # Add dashed line at y = 0
-  scale_color_manual(values = custom_colors) +  # Apply the custom color palette
-  labs(x = "Temperature (Treatment)", y = "Percent Change in Area (mm² ± s.e.)",
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +
+  scale_fill_manual(values = custom_colors) +   # Fill = group color
+  scale_color_manual(values = custom_colors) +  # Color = same as fill (for error bars)
+  scale_shape_manual(values = c(21, 24)) +      # Shapes that allow fill and border
+  labs(x = "Temperature (Treatment)", y = "Percent Change in Area (± s.e.)",
        title = "Percent Change in Larval Area from Timepoint 1 to 22") +
   theme_minimal() +
   theme(
     legend.position = "right",
-    panel.grid.major = element_blank(),  # Remove major grid lines
-    panel.grid.minor = element_blank(),  # Remove minor grid lines
-    axis.line = element_line(color = "black"),  # Keep x and y axis lines
-    axis.ticks = element_line(color = "black")  # Add axis ticks
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black"),
+    axis.ticks = element_line(color = "black")
   )
+
 
 # Display the plot
 print(perc_change_plot)
@@ -3236,49 +3233,56 @@ ggsave("combined_plot.png", plot = combined_plot, width = 12, height = 6, dpi = 
 Percent change in size for survivors
 
 ```{r}
-# Step 1: Filter the dataframe for larvae that survived to Timepoint 22
-survived_larvae <- df_clean %>%
-  filter(SizeT22 > 0)
+# Group by Treatment, Cross_2, and SymbiontTreatment, and calculate mean and standard error for percent change
+perc_change_summary <- totaldf_long %>%
+  filter(Timepoint == 22, Status == 0) %>%
+  group_by(Treatment, Cross_2, SymbiontTreatment, ReefMom) %>%
+  summarise(mean_perc_change = mean(PercChangeSize, na.rm = TRUE),
+            se_perc_change = sd(PercChangeSize, na.rm = TRUE) / sqrt(n()))
 
-# Step 2: Calculate the percent change in area for the filtered data
-survived_larvae <- survived_larvae %>%
-  mutate(PercChangeArea = ((SizeT22 - SizeT1) / SizeT1) * 100)
-
-# Step 3: Summarize the percent change for plotting
-perc_change_summary_survived <- survived_larvae %>%
-  group_by(Treatment, ReefMom, SymbiontTreatment, Cross_2) %>%
-  summarise(mean_perc_change = mean(PercChangeArea, na.rm = TRUE),
-            se_perc_change = sd(PercChangeArea, na.rm = TRUE) / sqrt(n()))
-
-# Reorder the Treatment factor in the desired order
-perc_change_summary_survived <- perc_change_summary_survived %>%
-  mutate(Treatment = factor(Treatment, levels = c("Ambient", "31", "35.5")))
-
-# Ensure the Family variable is a factor (if not already)
-survived_larvae$ReefMom <- as.factor(survived_larvae$ReefMom)
-
-# Create custom color names for each curve
-custom_curve_names <- c("coral2", "orange", "darkkhaki", "aquamarine3", "darkred", "darkorchid", "blue","coral2", "orange", "darkkhaki", "aquamarine3", "darkred", "darkorchid", "blue","coral2", "orange", "darkkhaki", "aquamarine3", "darkred", "darkorchid", "blue"
+all_combos <- expand.grid(
+  Treatment = c("Ambient", "31"),
+  Cross_2 = unique(totaldf_long$Cross_2),
+  SymbiontTreatment = unique(totaldf_long$SymbiontTreatment),
+  ReefMom = unique (totaldf_long$ReefMom),
+  stringsAsFactors = FALSE
 )
 
+perc_change_summary <- all_combos %>%
+  left_join(perc_change_summary, by = c("Treatment", "Cross_2", "SymbiontTreatment", "ReefMom")) %>%
+  mutate(
+    mean_area = ifelse(is.na(mean_perc_change), 0, mean_perc_change),
+    se_area = ifelse(is.na(se_perc_change), 0, se_perc_change),
+    Treatment = factor(Treatment, levels = c("Ambient", "31", "35.5"))  # Re-set factor levels
+  )
+
+# Define a custom color palette (same as before)
+custom_colors <- c("CC" = "#1f77b4", "WW" = "#ff7f0e")  # Modify colors as needed
+
 # Plot percent change in area with colors assigned to Cross_2 and separate panels for Family
-survivors_perc_change <- ggplot(perc_change_summary_survived, aes(x = Treatment, y = mean_perc_change, 
-                                         color = Cross_2, shape = SymbiontTreatment)) +
-  geom_point(size = 4) +
-  geom_errorbar(aes(ymin = mean_perc_change - se_perc_change, ymax = mean_perc_change + se_perc_change), 
-                width = 0.2) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +  # Add dashed line at y = 0
-  scale_color_manual(values = custom_colors) +  # Use the color palette for Cross_2
+survivors_perc_change <- ggplot(perc_change_summary, aes(x = Treatment, y = mean_perc_change, 
+                                                        fill = Cross_2, shape = SymbiontTreatment)) +
+  geom_line(aes(group = interaction(Cross_2, SymbiontTreatment), color = Cross_2), size = 0.7) +  # connecting lines
+  geom_point(size = 4, color = "black", stroke = 1.5) +  # points with black border
+  geom_errorbar(aes(ymin = mean_perc_change - se_perc_change,
+                    ymax = mean_perc_change + se_perc_change,
+                    color = Cross_2), width = 0.2) +  # error bars matching fill color
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +
+  scale_fill_manual(values = custom_colors) +  # fill for points
+  scale_color_manual(values = custom_colors) + # color for error bars and lines
+  scale_shape_manual(values = c(21, 24)) + # shapes that support fill + border
+  facet_wrap(~ ReefMom, nrow = 7) +
   labs(x = "Temperature (Treatment)", y = "Percent Change in Area (mm² ± s.e.)",
        title = "Percent Change in Larval Area (Survived to Timepoint 22)") +
-  facet_wrap(~ ReefMom, nrow = 7) +  # Create separate panels for each Family
   theme_minimal() +
   theme(
-    legend.position = "right",  # Position of the legend
-    panel.grid.major = element_blank(),  # Remove major grid lines
-    panel.grid.minor = element_blank(),  # Remove minor grid lines
-    axis.line = element_line(color = "black", linewidth = 0.5)  # Keep axis lines
+    legend.position = "right",
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", linewidth = 0.5),
+    axis.ticks = element_line(color = "black")
   )
+
 
 print(survivors_perc_change)
 
@@ -3294,15 +3298,17 @@ Combine the 3 plots for size into one figure
 
 ```{r}
 # Combine the three plots into one figure
-combined_plot2 <- area_plot + perc_change_plot + survivors_perc_change + 
+combined_plot2 <- area_plot +  theme(legend.position = "none") +
+  perc_change_plot +  theme(legend.position = "none") +
+  survivors_perc_change +  theme(legend.position = "none") +
   plot_layout(ncol = 3)  # Stack them vertically (1 column)
 
 # Display the combined plot
 print(combined_plot2)
 
-ggsave("combined_plot_size.png", 
+ggsave("C:/Users/bellb/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/combined_plot_size.png", 
        plot = combined_plot2,  # Save the most recent plot
-       width = 15,          # Set the width of the plot (in inches)
+       width = 10,          # Set the width of the plot (in inches)
        height = 7,          # Set the height of the plot (in inches)
        dpi = 300)           # Set the resolution (300 dpi is good for publications)  
 
@@ -3312,11 +3318,9 @@ Plot of mean FV/FM at T22
 (first measurements taken at T4)
 
 ```{r}
-# Replace NA values with zeros in the Area..mm.2. column
-#df_clean$FvFm[is.na(df_clean$FvFm)] <- 0
 
 # Filter the dataframe to get data for the final timepoint (22)
-final_timepoint_fvfm_df <- df_clean %>%
+final_timepoint_fvfm_df <- totaldf_long %>%
   filter(Timepoint == 22) %>%
   group_by(Treatment, Cross_2, SymbiontTreatment) %>%
   summarise(mean_fvfm = mean(FvFm, na.rm = TRUE),
@@ -3326,56 +3330,72 @@ final_timepoint_fvfm_df <- df_clean %>%
 final_timepoint_fvfm_df <- final_timepoint_fvfm_df %>%
   mutate(Treatment = factor(Treatment, levels = c("Ambient", "31", "35.5")))
 
+# Identify all combinations that should be present
+all_combos <- expand.grid(
+  Treatment = c("Ambient", "31", "35.5"),
+  SymbiontTreatment = unique(final_timepoint_fvfm_df$SymbiontTreatment),
+  Cross_2 = unique(final_timepoint_fvfm_df$Cross_2)
+)
+
+# Join with existing data
+final_timepoint_fvfm_df <- all_combos %>%
+  left_join(final_timepoint_fvfm_df, by = c("Treatment", "SymbiontTreatment", "Cross_2")) %>%
+  mutate(
+    Timepoint = 22,
+    mean_fvfm = ifelse(is.na(mean_fvfm), 0, mean_fvfm),
+    se_fvfm = ifelse(is.na(se_fvfm), 0, se_fvfm)
+  )
+
 # Define a custom color palette
-custom_colors <- c("BxB" = "#1f77b4", "TxT" = "#ff7f0e") # Modify colors as needed
+custom_colors <- c("CC" = "#1f77b4", "WW" = "#ff7f0e") # Modify colors as needed
 
 # Plot the mean area with error bars and custom colors
 fvfm_plot <- ggplot(final_timepoint_fvfm_df, aes(x = Treatment, y = mean_fvfm, 
-                               color = Cross_2, shape = SymbiontTreatment)) +
-  geom_point(size = 4) +
-  geom_errorbar(aes(ymin = mean_fvfm - se_fvfm, ymax = mean_fvfm + se_fvfm), 
+                                                 fill = Cross_2, shape = SymbiontTreatment)) +
+  # Error bars match fill color
+  geom_errorbar(aes(ymin = mean_fvfm - se_fvfm, ymax = mean_fvfm + se_fvfm,
+                    color = Cross_2), 
                 width = 0.2) +
-  scale_color_manual(values = custom_colors) +  # Apply the custom color palette
-  labs(x = "Temperature (Treatment)", y = "Mean Fv/Fm (± s.e.)",
-       title = "Mean Larval Fv/Fm at Final Timepoint (22)") +
-  theme_minimal() +
-  theme(legend.position = "right")
+  
+  # Reference line
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +
 
-fvfm_plot
+  # Points with fill and black border
+  geom_point(size = 4, stroke = 1.2, color = "black") +
 
-# Updated area_plot with only x and y axis lines, no grid lines, and a dashed line at y = 0
-fvfm_plot <- ggplot(final_timepoint_fvfm_df, aes(x = Treatment, y = mean_fvfm, 
-                                            color = Cross_2, shape = SymbiontTreatment)) +
-  geom_point(size = 4) +
-  geom_errorbar(aes(ymin = mean_fvfm - se_fvfm, ymax = mean_fvfm + se_fvfm), 
-                width = 0.2) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +  # Add dashed line at y = 0
-  scale_color_manual(values = custom_colors) +  # Apply the custom color palette
-  labs(x = "Temperature Treatment", y = "Mean Fv/Fm (± s.e.)",
+  # Manual color settings
+  scale_fill_manual(values = custom_colors) +
+  scale_color_manual(values = custom_colors) +
+  scale_shape_manual(values = c("C" = 21, "D" = 24)) +
+
+  # Labels and theme
+  labs(x = "Temperature Treatment", 
+       y = "Mean Fv/Fm (± s.e.)",
        title = "Mean Larval Fv/Fm at Final Timepoint (22)") +
   theme_minimal() +
   theme(
     legend.position = "right",
-    panel.grid.major = element_blank(),  # Remove major grid lines
-    panel.grid.minor = element_blank(),  # Remove minor grid lines
-    axis.line = element_line(color = "black"),  # Keep x and y axis lines
-    axis.ticks = element_line(color = "black")  # Add axis ticks
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black"),
+    axis.ticks = element_line(color = "black")
   )
 
-# Display the plot
-print(fvfm_plot)
+fvfm_plot
 
 # Create inset for the above plot
 # Step 1: Filter the dataframe to get data for the final timepoint (22)
-final_timepoint_fvfm_df_inset <- df_clean %>%
+
+# Reorder the Treatment factor in the desired order
+totaldf_long <- totaldf_long %>%
+  mutate(Treatment = factor(Treatment, levels = c("Ambient", "31", "35.5")))
+
+final_timepoint_fvfm_df_inset <- totaldf_long %>%
+  filter(Treatment != "35.5") %>% 
   filter(Timepoint == 22) %>%
   group_by(Treatment) %>%
   summarise(mean_fvfm = mean(FvFm, na.rm = TRUE),
             se_fvfm = sd(FvFm, na.rm = TRUE) / sqrt(n()))
-
-# Reorder the Treatment factor in the desired order
-final_timepoint_fvfm_df_inset <- final_timepoint_fvfm_df_inset %>%
-  mutate(Treatment = factor(Treatment, levels = c("Ambient", "31", "35.5")))
 
 # Step 2: Create the plot
 mean_fvfm_plot <- ggplot(final_timepoint_fvfm_df_inset, aes(x = Treatment, y = mean_fvfm)) +
@@ -3396,14 +3416,15 @@ print(mean_fvfm_plot)
 
 # Create inset for the above plot seperated by Treatment and Symbiont treatment
 # Step 1: Filter the dataframe to get data for the final timepoint (22)
-final_timepoint_fvfm_df_inset2 <- df_clean %>%
+final_timepoint_fvfm_df_inset2 <- totaldf_long %>%
+  filter(Treatment != "35.5") %>%
   filter(Timepoint == 22) %>%
   group_by(Treatment, SymbiontTreatment) %>%
   summarise(mean_fvfm = mean(FvFm, na.rm = TRUE),
             se_fvfm = sd(FvFm, na.rm = TRUE) / sqrt(n()))
 
 # Reorder the Treatment factor in the desired order
-final_timepoint_fvfm_df_inset2 <- final_timepoint_fvfm_df_inset2 %>%
+totaldf_long <- totaldf_long %>%
   mutate(Treatment = factor(Treatment, levels = c("Ambient", "31", "35.5")))
 
 # Step 2: Create the plot
@@ -3430,7 +3451,7 @@ combined_plot_mean_fvfm <- mean_fvfm_plot + mean_fvfm_plot2 + plot_layout(ncol =
 print(combined_plot_mean_fvfm)
 
 # Save the combined plot as a PNG file
-ggsave("combined_plot_mean_fvfm_inset.png", plot = combined_plot_mean_fvfm, width = 6, height = 3, dpi = 300)
+ggsave("C:/Users/bellb/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/combined_plot_mean_fvfm_inset.png", plot = combined_plot_mean_fvfm, width = 6, height = 3, dpi = 300)
 
 ```
 
@@ -3438,97 +3459,104 @@ ggsave("combined_plot_mean_fvfm_inset.png", plot = combined_plot_mean_fvfm, widt
 Plot of percent change in FvFm
 
 ```{r}
-colnames(df_clean)[32] <- "FvFm"
-
-# Extract the fvfm at Timepoint 4 (first measurement)
-fvfm_t4 <- df_clean %>%
-  filter(Timepoint == 4) %>%
-  select(UniqueID, FvFm) %>%
-  rename(FvFmT4 = FvFm)
-
-# Extract the fvfm at Timepoint 22 (last measurement)
-fvfm_t22 <- df_clean %>%
-  filter(Timepoint == 22) %>%
-  select(UniqueID, FvFm) %>%
-  rename(FvFmT22 = FvFm)
-
-# Merge FvFmT4 and FvFmT22 back into the main dataframe
-df_clean <- df_clean %>%
-  left_join(fvfm_t4, by = "UniqueID", relationship = "many-to-many") %>%
-  left_join(fvfm_t22, by = "UniqueID", relationship = "many-to-many")
-
-# Add a small constant to FvFmT4 and FvFmT22 where values are 0
-small_constant <- 0.0000000001
-
-# Replace 0 values in FvFmT4 and FvFmT22 with the small constant
-df_clean$FvFmT4 <- ifelse(df_clean$FvFmT4 == 0, small_constant, df_clean$FvFmT4)
-df_clean$FvFmT22 <- ifelse(df_clean$FvFmT22 == 0, small_constant, df_clean$FvFmT22)
-
-# Calculate the percent change
-df_clean$PercChangeFvFm <- (df_clean$FvFmT22 - df_clean$FvFmT4) / df_clean$FvFmT4 * 100
-
-df_clean <- df_clean %>%
-  mutate(
-    LogChangeFvFm = log(FvFmT22 / FvFmT4)  # Logarithmic change
-  )
-
-# Now df_clean has a new column 'PercChangeFvFm' representing the percent change in fvfm between Timepoint 4 and Timepoint 22
 
 # Group by Treatment, Cross_2, and SymbiontTreatment, and calculate mean and standard error for percent change
-log_change_fvfm_summary <- df_clean %>%
+perc_change_fvfm_summary <- totaldf_long %>%
+  filter(Timepoint == 22, Status == 0) %>%
   group_by(Treatment, Cross_2, SymbiontTreatment) %>%
-  summarise(mean_log_change = mean(LogChangeFvFm, na.rm = TRUE),
-            se_log_change = sd(LogChangeFvFm, na.rm = TRUE) / sqrt(n()))
+  summarise(
+    mean_perc_change = mean(PercChange, na.rm = TRUE),
+    se_perc_change = sd(PercChange, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )
 
 # Reorder the Treatment factor in the desired order
-log_change_fvfm_summary <- log_change_fvfm_summary %>%
+perc_change_fvfm_summary <- perc_change_fvfm_summary %>%
   mutate(Treatment = factor(Treatment, levels = c("Ambient", "31", "35.5")))
 
+# Identify all combinations that should be present
+all_combos <- expand.grid(
+  Treatment = c("Ambient", "31", "35.5"),
+  SymbiontTreatment = unique(perc_change_fvfm_summary$SymbiontTreatment),
+  Cross_2 = unique(perc_change_fvfm_summary$Cross_2)
+)
+
+# Join with existing data
+perc_change_fvfm_summary <- all_combos %>%
+  left_join(perc_change_fvfm_summary, by = c("Treatment", "SymbiontTreatment", "Cross_2")) %>%
+  mutate(
+    Timepoint = 22,
+    mean_pct = ifelse(is.na(mean_perc_change), 0, mean_perc_change),
+    se_perc_change = ifelse(is.na(se_perc_change), 0, se_perc_change)
+  )
+
 # Define a custom color palette (same as before)
-custom_colors <- c("BxB" = "#1f77b4", "TxT" = "#ff7f0e")  # Modify colors as needed
+custom_colors <- c("CC" = "#1f77b4", "WW" = "#ff7f0e")  # Modify colors as needed
 
 # Plot the percent change in area with error bars and custom colors
-log_change_fvfm_plot <- ggplot(log_change_fvfm_summary, aes(x = Treatment, y = mean_log_change, 
-                                                    color = Cross_2, shape = SymbiontTreatment)) +
-  geom_point(size = 4) +
-  geom_errorbar(aes(ymin = mean_log_change - se_log_change, ymax = mean_log_change + se_log_change), 
-                width = 0.2) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +  # Add dashed line at y = 0
-  scale_color_manual(values = custom_colors) +  # Apply the custom color palette
-  labs(x = "Temperature (Treatment)", y = "Log Change in Fv/Fm (± s.e.)",
-       title = "Log Change in Larval Fv/Fm from Timepoint 4 to 22") +
-  ylim(-5, 15) +  # Adjust y-axis limits (change the values as needed)
+perc_change_fvfm_plot <- ggplot(perc_change_fvfm_summary, aes(
+  x = Treatment,
+  y = mean_perc_change,
+  fill = Cross_2,
+  shape = SymbiontTreatment
+)) +
+  # Error bars colored by Cross_2 (same as fill)
+  geom_errorbar(
+    aes(
+      ymin = mean_perc_change - se_perc_change,
+      ymax = mean_perc_change + se_perc_change,
+      color = Cross_2
+    ),
+    width = 0.2
+  ) +
+  # Points with colored fill and black border
+  geom_point(
+    size = 4,
+    stroke = 1.2,
+    color = "black"  # black border
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +
+  scale_fill_manual(values = custom_colors) +   # fill for points
+  scale_color_manual(values = custom_colors) +  # color for error bars
+  scale_shape_manual(values = c("C" = 21, "D" = 24)) +  # circle and triangle
+  labs(
+    x = "Temperature (Treatment)",
+    y = "% Change in Fv/Fm (± s.e.)",
+    title = "% Change in Larval Fv/Fm from Timepoint 4 to 22"
+  ) +
   theme_minimal() +
   theme(
     legend.position = "right",
-    panel.grid.major = element_blank(),  # Remove major grid lines
-    panel.grid.minor = element_blank(),  # Remove minor grid lines
-    axis.line = element_line(color = "black"),  # Keep x and y axis lines
-    axis.ticks = element_line(color = "black")  # Add axis ticks
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black"),
+    axis.ticks = element_line(color = "black")
   )
 
+
 # Display the plot
-print(log_change_fvfm_plot)
+print(perc_change_fvfm_plot)
 
 # Create inset just for treatment
 # Group by Treatment and calculate mean and standard error for percent change
-log_change_summary2 <- df_clean %>%
+perc_change_summary2 <- totaldf_long %>%
+  filter(Treatment != "35.5") %>% 
   group_by(Treatment) %>%
-  summarise(mean_log_change = mean(LogChangeFvFm, na.rm = TRUE),
-            se_log_change = sd(LogChangeFvFm, na.rm = TRUE) / sqrt(n()))
+  summarise(mean_perc_change = mean(PercChange, na.rm = TRUE),
+            se_perc_change = sd(PercChange, na.rm = TRUE) / sqrt(n()))
 
 # Reorder the Treatment factor in the desired order
-log_change_summary2 <- log_change_summary2 %>%
+perc_change_summary2 <- perc_change_summary2 %>%
   mutate(Treatment = factor(Treatment, levels = c("Ambient", "31", "35.5")))
 
 # Plot the percent change in area with error bars and custom colors
-log_change_plot2 <- ggplot(log_change_summary2, aes(x = Treatment, y = mean_log_change)) +
+perc_change_plot2 <- ggplot(perc_change_summary2, aes(x = Treatment, y = mean_perc_change)) +
   geom_point(size = 4, shape = 1, stroke = 1.5) +
-  geom_errorbar(aes(ymin = mean_log_change - se_log_change, ymax = mean_log_change + se_log_change), 
+  geom_errorbar(aes(ymin = mean_perc_change - se_perc_change, ymax = mean_perc_change + se_perc_change), 
                 width = 0.2) +
   geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +  # Add dashed line at y = 0
-  labs(x = "Temperature (Treatment)", y = "Log Change in Fv/Fm (± s.e.)",
-       title = "Log Change in Larval Fv/Fm from Timepoint 4 to 22") +
+  labs(x = "Temperature (Treatment)", y = "% Change in Fv/Fm (± s.e.)",
+       title = "% Change in Larval Fv/Fm from Timepoint 4 to 22") +
   theme_minimal() +
   theme(
     legend.position = "right",
@@ -3539,27 +3567,28 @@ log_change_plot2 <- ggplot(log_change_summary2, aes(x = Treatment, y = mean_log_
   )
 
 # Display the plot
-print(log_change_plot2)
+print(perc_change_plot2)
 
 # Create inset for treatment and symbiont treatment
 # Group by Treatment and SymbiontTreatment, and calculate mean and standard error for percent change
-log_change_summary3 <- df_clean %>%
+perc_change_summary3 <- totaldf_long %>%
+  filter(Treatment != "35.5") %>% 
   group_by(Treatment, SymbiontTreatment) %>%
-  summarise(mean_log_change = mean(LogChangeFvFm, na.rm = TRUE),
-            se_log_change = sd(LogChangeFvFm, na.rm = TRUE) / sqrt(n()))
+  summarise(mean_perc_change = mean(PercChange, na.rm = TRUE),
+            se_perc_change = sd(PercChange, na.rm = TRUE) / sqrt(n()))
 
 # Reorder the Treatment factor in the desired order
-log_change_summary3 <- log_change_summary3 %>%
+perc_change_summary3 <- perc_change_summary3 %>%
   mutate(Treatment = factor(Treatment, levels = c("Ambient", "31", "35.5")))
 
 # Plot the percent change in area with error bars and custom colors
-log_change_plot3 <- ggplot(log_change_summary3, aes(x = Treatment, y = mean_log_change, shape = SymbiontTreatment)) +
+perc_change_plot3 <- ggplot(perc_change_summary3, aes(x = Treatment, y = mean_perc_change, shape = SymbiontTreatment)) +
   geom_point(size = 4, stroke = 1.5) +
-  geom_errorbar(aes(ymin = mean_log_change - se_log_change, ymax = mean_log_change + se_log_change), 
+  geom_errorbar(aes(ymin = mean_perc_change - se_perc_change, ymax = mean_perc_change + se_perc_change), 
                 width = 0.2) +
   geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +  # Add dashed line at y = 0
-  labs(x = "Temperature (Treatment)", y = "Log Change in Fv/Fm (± s.e.)",
-       title = "Log Change in Larval Fv/Fm from Timepoint 4 to 22") +
+  labs(x = "Temperature (Treatment)", y = "% Change in Fv/Fm (± s.e.)",
+       title = "% Change in Larval Fv/Fm from Timepoint 4 to 22") +
   theme_minimal() +
   theme(
     legend.position = "right",
@@ -3570,92 +3599,133 @@ log_change_plot3 <- ggplot(log_change_summary3, aes(x = Treatment, y = mean_log_
   )
 
 # Display the plot
-print(log_change_plot3)
+print(perc_change_plot3)
 
 library(patchwork)
 
 # Combine the two plots side by side
-combined_plot_log_fvfm <- log_change_plot2 + log_change_plot3 + plot_layout(ncol = 2)
+combined_plot_perc_fvfm <- perc_change_plot2 + perc_change_plot3 + plot_layout(ncol = 2)
 
 # Display the combined plot
-print(combined_plot_log_fvfm)
+print(combined_plot_perc_fvfm)
 
 # Save the combined plot as a PNG file
-ggsave("combined_plot_log_fvfm_inset.png", plot = combined_plot_log_fvfm, width = 6, height = 3, dpi = 300)
+ggsave("C:/Users/bellb/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/combined_plot_perc_fvfm_inset.png", plot = combined_plot_perc_fvfm, width = 6, height = 3, dpi = 300)
 ```
 
 Percent change in FVFM for survivors
 
 ```{r}
-# Step 1: Filter the dataframe for larvae that survived to Timepoint 22
-survived_larvae_fvfm <- df_clean %>%
-  filter(FvFmT22 > 0.0000000001)
-
-# Step 2: Calculate the log change in fvfm for the filtered data
-survived_larvae_fvfm <- survived_larvae_fvfm %>%
-  mutate(LogChangeFvFm = log(FvFmT22 / FvFmT4))
-
-# Step 3: Summarize the log change for plotting
-log_change_summary_survived <- survived_larvae_fvfm %>%
-  group_by(Treatment, ReefMom, SymbiontTreatment, Cross_2) %>%
-  summarise(mean_log_change = mean(LogChangeFvFm, na.rm = TRUE),
-            se_log_change = sd(LogChangeFvFm, na.rm = TRUE) / sqrt(n()))
-
-# Reorder the Treatment factor in the desired order
-log_change_summary_survived <- log_change_summary_survived %>%
-  mutate(Treatment = factor(Treatment, levels = c("Ambient", "31", "35.5")))
-
-# Ensure the Family variable is a factor (if not already)
-survived_larvae_fvfm$ReefMom <- as.factor(survived_larvae_fvfm$ReefMom)
-
-# Create custom color names for each curve
-custom_curve_names <- c("coral2", "orange", "darkkhaki", "aquamarine3", "darkred", "darkorchid", "blue","coral2", "orange", "darkkhaki", "aquamarine3", "darkred", "darkorchid", "blue","coral2", "orange", "darkkhaki", "aquamarine3", "darkred", "darkorchid", "blue"
-)
-
-# Plot percent change in area with colors assigned to Cross_2 and separate panels for Family
-survivors_log_change <- ggplot(log_change_summary_survived, aes(x = Treatment, y = mean_log_change, 
-                                         color = Cross_2, shape = SymbiontTreatment)) +
-  geom_point(size = 4) +
-  geom_errorbar(aes(ymin = mean_log_change - se_log_change, ymax = mean_log_change + se_log_change), 
-                width = 0.2) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +  # Add dashed line at y = 0
-  scale_color_manual(values = custom_colors) +  # Use the color palette for Cross_2
-  labs(x = "Temperature (Treatment)", y = "Log Change in Fv/Fm (± s.e.)",
-       title = "Log Change in Larval Fv/Fm (Survived to Timepoint 22)") +
-  facet_wrap(~ ReefMom, nrow = 7) +  # Create separate panels for each Family
-  theme_minimal() +
-  theme(
-    legend.position = "right",  # Position of the legend
-    panel.grid.major = element_blank(),  # Remove major grid lines
-    panel.grid.minor = element_blank(),  # Remove minor grid lines
-    axis.line = element_line(color = "black", linewidth = 0.5)  # Keep axis lines
+# Group by Treatment, Cross_2, and SymbiontTreatment, and calculate mean and standard error for percent change
+perc_change_fvfm_summary <- totaldf_long %>%
+  filter(Timepoint == 22, Status == 0) %>%
+  group_by(Treatment, Cross_2, SymbiontTreatment, ReefMom) %>%
+  summarise(
+    mean_perc_change = mean(PercChange, na.rm = TRUE),
+    se_perc_change = sd(PercChange, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
   )
 
-print(survivors_log_change)
+# Reorder the Treatment factor in the desired order
+perc_change_fvfm_summary <- perc_change_fvfm_summary %>%
+  mutate(Treatment = factor(Treatment, levels = c("Ambient", "31", "35.5")))
+
+# Identify all combinations that should be present
+all_combos <- expand.grid(
+  Treatment = c("Ambient", "31"),
+  SymbiontTreatment = unique(perc_change_fvfm_summary$SymbiontTreatment),
+  Cross_2 = unique(perc_change_fvfm_summary$Cross_2),
+  ReefMom = unique(perc_change_fvfm_summary$ReefMom)
+)
+
+# Join with existing data
+perc_change_fvfm_summary <- all_combos %>%
+  left_join(perc_change_fvfm_summary, by = c("Treatment", "SymbiontTreatment", "Cross_2", "ReefMom")) %>%
+  mutate(
+    Timepoint = 22,
+    mean_pct = ifelse(is.na(mean_perc_change), 0, mean_perc_change),
+    se_perc_change = ifelse(is.na(se_perc_change), 0, se_perc_change)
+  )
+
+# Define a custom color palette (same as before)
+custom_colors <- c("CC" = "#1f77b4", "WW" = "#ff7f0e")  # Modify colors as needed
+
+# Plot percent change in area with colors assigned to Cross_2 and separate panels for Family
+survivors_perc_change <- ggplot(perc_change_fvfm_summary, aes(
+  x = Treatment,
+  y = mean_perc_change,
+  fill = Cross_2,
+  shape = SymbiontTreatment,
+  group = interaction(Cross_2, SymbiontTreatment)
+)) +
+  # Colored lines connecting points
+  geom_line(aes(color = Cross_2), linewidth = 0.8) +
+
+  # Error bars colored by fill
+  geom_errorbar(aes(
+    ymin = mean_perc_change - se_perc_change,
+    ymax = mean_perc_change + se_perc_change,
+    color = Cross_2
+  ), width = 0.2) +
+
+  # Points with black border and colored fill
+  geom_point(size = 4, stroke = 1.2, color = "black") +
+
+  # Reference line at 0
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +
+
+  # Manual color and shape control
+  scale_fill_manual(values = custom_colors) +
+  scale_color_manual(values = custom_colors) +
+  scale_shape_manual(values = c("C" = 21, "D" = 24)) +
+
+  # Labels and faceting
+  labs(
+    x = "Temperature (Treatment)",
+    y = "Percent Change in Fv/Fm (± s.e.)",
+    title = "% Change in Larval Fv/Fm (Survived to Timepoint 22)"
+  ) +
+  facet_wrap(~ ReefMom, nrow = 7) +
+
+  # Theme styling
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black", linewidth = 0.5),
+    axis.ticks = element_line(color = "black")
+  )
+
+
+print(survivors_perc_change)
 
 # Save the plot to a file
-ggsave("survivors_log_change_plot.png", 
-       plot = survivors_log_change,  # Save the most recent plot
-       width = 10,          # Set the width of the plot (in inches)
-       height = 7,          # Set the height of the plot (in inches)
-       dpi = 300)           # Set the resolution (300 dpi is good for publications)  
+ggsave("survivors_perc_change_plot.png", 
+       plot = survivors_perc_change,  
+       width = 10,          
+       height = 7,          
+       dpi = 300)           
+
 ```
 
 Combine the 3 plots for size into one figure
 
 ```{r}
 # Combine the three plots into one figure
-combined_plot3 <- fvfm_plot + log_change_fvfm_plot + survivors_log_change + 
+combined_plot3 <- fvfm_plot + theme(legend.position = "none") + 
+  perc_change_fvfm_plot + theme(legend.position = "none") +
+  survivors_perc_change + theme(legend.position = "none") +
   plot_layout(ncol = 3)  # Stack them vertically (1 column)
 
 # Display the combined plot
 print(combined_plot3)
 
-ggsave("combined_plot_fvfm.png", 
-       plot = combined_plot3,  # Save the most recent plot
-       width = 15,          # Set the width of the plot (in inches)
-       height = 7,          # Set the height of the plot (in inches)
-       dpi = 300)           # Set the resolution (300 dpi is good for publications)  
+ggsave("C:/Users/bellb/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/combined_plot_fvfm.png", 
+       plot = combined_plot3,  
+       width = 10,          
+       height = 7,          
+       dpi = 300)           
 
 ```
 Percentage of Larvae with Cells: line graphs
@@ -3665,27 +3735,25 @@ library(ggplot2)
 library(patchwork)  # for plot_layout()
 
 # Replace NA values with zeros in PercentageWithCells column
-summary_df3_survived$PercentageWithCells[is.na(summary_df3_survived$PercentageWithCells)] <- 0
+summary_df2_survived$PercentageWithCells[is.na(summary_df2_survived$PercentageWithCells)] <- 0
 
-summary_df3_survived <- summary_df3_survived %>%
+summary_df2_survived <- summary_df2_survived %>%
   mutate(Cross = case_when(
     ReefMom %in% c("BT2", "BT4", "BT8") ~ "CC",
     TRUE ~ "WW"
   ))
 
-summary_df3_survived %>%
-  group_by(DayNumber, SymbiontTreatment, TREATMENT) %>%
+summary_df2_survived %>%
+  group_by(TIMEPOINT, SymbiontTreatment, TREATMENT) %>%
   summarise(n = sum(!is.na(PercentageWithCells))) %>%
   print(n = Inf)
 
-str(summary_df3_survived$PercentageWithCells)
-
-str(summary_df3_survived)
+str(summary_df2_survived$PercentageWithCells)
 
 # Filter the dataframe to get data for the final timepoint (22)
-summary_stats_day22 <- summary_df3_survived %>%
-  filter(DayNumber == 22) %>%
-  group_by(DayNumber, SymbiontTreatment, TREATMENT, Cross) %>%
+summary_stats_day22 <- summary_df2_survived %>%
+  filter(TIMEPOINT == 22) %>%
+  group_by(TIMEPOINT, SymbiontTreatment, TREATMENT, Cross) %>%
   summarise(
     mean_pct = mean(PercentageWithCells, na.rm = TRUE),
     n = sum(!is.na(PercentageWithCells)),
@@ -3696,6 +3764,34 @@ summary_stats_day22 <- summary_df3_survived %>%
   ) %>%
   ungroup()
 
+# Set factor levels BEFORE plotting, to retain all x-axis categories
+summary_stats_day22 <- summary_stats_day22 %>%
+  mutate(TREATMENT = factor(TREATMENT, levels = c("T1", "T2", "T3")))
+
+# Make a full combination of all groups you'd expect at Timepoint 22
+all_combos <- expand.grid(
+  TREATMENT = c("T1", "T2", "T3"),
+  SymbiontTreatment = unique(summary_stats_day22$SymbiontTreatment),
+  Cross = unique(summary_stats_day22$Cross)
+)
+
+# Merge with your summary data
+summary_stats_day22 <- all_combos %>%
+  left_join(summary_stats_day22, by = c("TREATMENT", "SymbiontTreatment", "Cross")) %>%
+  mutate(
+    TIMEPOINT = 22,
+    mean_pct = ifelse(is.na(mean_pct), 0, mean_pct),
+    se = ifelse(is.na(se), 0, se),
+    TREATMENT = factor(TREATMENT, levels = c("T1", "T2", "T3"))
+  )
+
+summary_stats_day22$SymbiontTreatment <- factor(
+  summary_stats_day22$SymbiontTreatment,
+  levels = c("C", "D")  # or whatever levels you actually have
+)
+
+
+
 # Reorder the Treatment factor in the desired order
 #final_timepoint_df <- final_timepoint_df %>%
 #  mutate(TREATMENT = factor(TREATMENT, levels = c("Ambient", "31", "35.5")))
@@ -3704,14 +3800,37 @@ summary_stats_day22 <- summary_df3_survived %>%
 custom_colors <- c("CC" = "#1f77b4", "WW" = "#ff7f0e") # Modify as needed
 
 # Plot mean PercentageWithCells with error bars and custom colors
-pct_plot <- ggplot(summary_stats_day22, aes(x = TREATMENT, y = mean_pct, 
-                                          color = Cross, shape = SymbiontTreatment)) +
-  geom_point(size = 4) +
-  geom_errorbar(aes(ymin = mean_pct - se, ymax = mean_pct + se), width = 0.2) +
+pct_plot <- ggplot(summary_stats_day22, aes(
+  x = TREATMENT,
+  y = mean_pct,
+  fill = Cross,
+  shape = SymbiontTreatment
+)) +
+  # Error bars take the fill color
+  geom_errorbar(
+    aes(ymin = mean_pct - se, ymax = mean_pct + se, color = Cross),
+    width = 0.2
+  ) +
+
+  # Points with black outlines and colored fill
+  geom_point(
+    size = 4,
+    stroke = 1.2,
+    color = "black"  # black border
+  ) +
+
   geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +
-  scale_color_manual(values = custom_colors) +
-  labs(x = "Temperature Treatment", y = "Mean % With Cells (± s.e.)",
-       title = "Mean Percentage With Cells at Final Timepoint (22)") +
+
+  scale_fill_manual(values = custom_colors) +
+  scale_color_manual(values = custom_colors) +  # for error bars
+  scale_shape_manual(values = c("C" = 21, "D" = 24)) +
+
+  labs(
+    x = "Temperature Treatment",
+    y = "Mean % With Cells (± s.e.)",
+    title = "Mean Percentage With Cells at Final Timepoint (22)"
+  ) +
+
   theme_minimal() +
   theme(
     legend.position = "right",
@@ -3724,8 +3843,8 @@ pct_plot <- ggplot(summary_stats_day22, aes(x = TREATMENT, y = mean_pct,
 print(pct_plot)
 
 # Create inset plot by Treatment only
-final_timepoint_df_inset <- summary_df3_survived %>%
-  filter(DayNumber == 22) %>%
+final_timepoint_df_inset <- summary_df2_survived %>%
+  filter(TIMEPOINT == 22) %>%
   group_by(TREATMENT) %>%
   summarise(
     mean_pct = mean(PercentageWithCells, na.rm = TRUE),
@@ -3783,54 +3902,79 @@ ggsave("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Sp
 ```
 PercentageWithCells from Day 1 to Day 22
 ```{r}
-summary_df3_survived <- summary_df3_survived %>%
+summary_df2_survived <- summary_df2_survived %>%
   group_by(SymbiontTreatment, TREATMENT, Cross) %>%
   mutate(PercentageWithCells_adj = PercentageWithCells + 0.01)
 
 # Extract PercentageWithCells at Day 1
-cells_day1 <- summary_df3_survived %>%
-  filter(DayNumber == 1) %>%
-  select(TREATMENT, ReefMom, SymbiontTreatment, Cross, PercentageWithCells_adj) %>%
+cells_day1 <- summary_df2_survived %>%
+  filter(TIMEPOINT == 1) %>%
+  dplyr::select(TREATMENT, ReefMom, SymbiontTreatment, Cross, PercentageWithCells_adj) %>%
   rename(CellsDay1 = PercentageWithCells_adj)
 
 # Extract PercentageWithCells at Day 22
-cells_day22 <- summary_df3_survived %>%
-  filter(DayNumber == 22) %>%
-  select(TREATMENT, ReefMom, SymbiontTreatment, Cross, PercentageWithCells_adj) %>%
+cells_day22 <- summary_df2_survived %>%
+  filter(TIMEPOINT == 22) %>%
+  dplyr::select(TREATMENT, ReefMom, SymbiontTreatment, Cross, PercentageWithCells_adj) %>%
   rename(CellsDay22 = PercentageWithCells_adj)
 
 # Join Day 1 and Day 22 data
 cells_change_df <- left_join(cells_day1, cells_day22,
                              by = c("TREATMENT", "ReefMom", "SymbiontTreatment", "Cross"))
 
-# Calculate log change
+# Calculate change
 cells_change_df <- cells_change_df <- cells_change_df %>%
-  mutate(LogChangeCells = log(CellsDay22) - log(CellsDay1))
+  mutate(AcquisitionChangeCells = (CellsDay22) - (CellsDay1))
 
 
 # Summarize percent change by TREATMENT, Cross, SymbiontTreatment
-log_change_summary <- cells_change_df %>%
+perc_change_summary <- cells_change_df %>%
   group_by(TREATMENT, Cross, SymbiontTreatment) %>%
   summarise(
-    mean_perc_change = mean(LogChangeCells, na.rm = TRUE),
-    se_perc_change = sd(LogChangeCells, na.rm = TRUE) / sqrt(n()),
+    mean_perc_change = mean(AcquisitionChangeCells, na.rm = TRUE),
+    se_perc_change = sd(AcquisitionChangeCells, na.rm = TRUE) / sqrt(n()),
     .groups = "drop"
   )
 
 # Reorder treatment levels
-log_change_summary <- log_change_summary %>%
+perc_change_summary <- perc_change_summary %>%
   mutate(Treatment = factor(TREATMENT, levels = c("T1", "T2", "T3")))
 
 # Plot
-log_change_plot2 <- ggplot(log_change_summary, aes(x = Treatment, y = mean_perc_change,
-                                                  color = Cross, shape = SymbiontTreatment)) +
-  geom_point(size = 4) +
-  geom_errorbar(aes(ymin = mean_perc_change - se_perc_change,
-                    ymax = mean_perc_change + se_perc_change), width = 0.2) +
+log_change_plot2 <- ggplot(perc_change_summary, aes(
+  x = Treatment,
+  y = mean_perc_change,
+  fill = Cross,  # use fill instead of color
+  shape = SymbiontTreatment
+)) +
+  # Colored error bars based on Cross
+  geom_errorbar(aes(
+    ymin = mean_perc_change - se_perc_change,
+    ymax = mean_perc_change + se_perc_change,
+    color = Cross  # error bar matches fill
+  ), width = 0.2) +
+
+  # Points: colored fill, black border
+  geom_point(
+    size = 4,
+    stroke = 1.2,
+    color = "black"  # black outline
+  ) +
+
+  # Add reference line
   geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +
-  scale_color_manual(values = custom_colors) +
-  labs(x = "Temperature (Treatment)", y = "Log Change in % Larvae With Cells (± s.e.)",
-       title = "Log Change in Symbiotic Larvae from Day 1 to 22") +
+
+  # Manual color scales
+  scale_fill_manual(values = custom_colors) +   # for fill in points
+  scale_color_manual(values = custom_colors) +  # for error bars
+  scale_shape_manual(values = c(21, 24)) +      # use filled shapes
+
+  # Labels & styling
+  labs(
+    x = "Temperature (Treatment)",
+    y = "Change in % Larvae With Cells (± s.e.)",
+    title = "Change in Symbiotic Larvae from Day 1 to 22"
+  ) +
   theme_minimal() +
   theme(
     legend.position = "right",
@@ -3840,24 +3984,26 @@ log_change_plot2 <- ggplot(log_change_summary, aes(x = Treatment, y = mean_perc_
     axis.ticks = element_line(color = "black")
   )
 
+
 # Show plot
 print(log_change_plot2)
 
 # Summarize log change by TREATMENT only
-log_change_inset1 <- cells_change_df %>%
+perc_change_inset1 <- cells_change_df %>%
+  filter(TREATMENT != "T3") %>%  # Remove T3 before summary
   group_by(TREATMENT) %>%
   summarise(
-    mean_log_change = mean(LogChangeCells, na.rm = TRUE),
-    se_log_change = sd(LogChangeCells, na.rm = TRUE) / sqrt(n()),
+    mean_perc_change = mean(AcquisitionChangeCells, na.rm = TRUE),
+    se_perc_change = sd(AcquisitionChangeCells, na.rm = TRUE) / sqrt(n()),
     .groups = "drop"
   ) %>%
-  mutate(Treatment = factor(TREATMENT, levels = c("T1", "T2", "T3")))
+  mutate(Treatment = factor(TREATMENT, levels = c("T1", "T2")))
 
-log_change_plot_inset1 <- ggplot(log_change_inset1, aes(x = Treatment, y = mean_log_change)) +
+perc_change_plot_inset1 <- ggplot(perc_change_inset1, aes(x = Treatment, y = mean_perc_change)) +
   geom_point(size = 4, shape = 1, stroke = 1.5) +
-  geom_errorbar(aes(ymin = mean_log_change - se_log_change,
-                    ymax = mean_log_change + se_log_change), width = 0.2) +
-  labs(x = "Temperature (Treatment)", y = "Log Change in % With Cells (± s.e.)") +
+  geom_errorbar(aes(ymin = mean_perc_change - se_perc_change,
+                    ymax = mean_perc_change + se_perc_change), width = 0.2) +
+  labs(x = "Temperature (Treatment)", y = "Change in % With Cells (± s.e.)") +
   theme_minimal() +
   theme(
     panel.grid.major = element_blank(),
@@ -3865,19 +4011,20 @@ log_change_plot_inset1 <- ggplot(log_change_inset1, aes(x = Treatment, y = mean_
     axis.line = element_line(color = "black", linewidth = 0.5)
   )
 
-log_change_inset2 <- cells_change_df %>%
+perc_change_inset2 <- cells_change_df %>%
+  filter(TREATMENT != "T3") %>%  # Remove T3 before summary
   group_by(TREATMENT, SymbiontTreatment) %>%
   summarise(
-    mean_log_change = mean(LogChangeCells, na.rm = TRUE),
-    se_log_change = sd(LogChangeCells, na.rm = TRUE) / sqrt(n()),
+    mean_perc_change = mean(AcquisitionChangeCells, na.rm = TRUE),
+    se_perc_change = sd(AcquisitionChangeCells, na.rm = TRUE) / sqrt(n()),
     .groups = "drop"
   ) %>%
-  mutate(Treatment = factor(TREATMENT, levels = c("T1", "T2", "T3")))
+  mutate(Treatment = factor(TREATMENT, levels = c("T1", "T2")))
 
-log_change_plot_inset2 <- ggplot(log_change_inset2, aes(x = Treatment, y = mean_log_change, shape = SymbiontTreatment)) +
+perc_change_plot_inset2 <- ggplot(perc_change_inset2, aes(x = Treatment, y = mean_perc_change, shape = SymbiontTreatment)) +
   geom_point(size = 4, stroke = 1.5) +
-  geom_errorbar(aes(ymin = mean_log_change - se_log_change,
-                    ymax = mean_log_change + se_log_change), width = 0.2) +
+  geom_errorbar(aes(ymin = mean_perc_change - se_perc_change,
+                    ymax = mean_perc_change + se_perc_change), width = 0.2) +
   labs(x = "Temperature (Treatment)", y = "Log Change in % With Cells (± s.e.)") +
   theme_minimal() +
   theme(
@@ -3890,31 +4037,31 @@ log_change_plot_inset2 <- ggplot(log_change_inset2, aes(x = Treatment, y = mean_
 library(patchwork)
 
 # Combine the insets
-combined_log_change_insets <- log_change_plot_inset1 + log_change_plot_inset2 + plot_layout(ncol = 2)
+combined_perc_change_insets <- perc_change_plot_inset1 + perc_change_plot_inset2 + plot_layout(ncol = 2)
 
 # Print
-print(combined_log_change_insets)
+print(combined_perc_change_insets)
 
-ggsave("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/combined_log_change_insets_pct.png", plot = combined_log_change_insets,
+ggsave("C:/Users/bellb/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/combined_perc_change_insets_pct.png", plot = combined_perc_change_insets,
        width = 6, height = 3, dpi = 300)
 
 ```
 
 ```{r}
-summary_df3_survived <- summary_df3_survived %>%
+summary_df2_survived <- summary_df2_survived %>%
   group_by(SymbiontTreatment, TREATMENT, Cross, ReefMom) %>%
   mutate(PercentageWithCells_adj = PercentageWithCells + 0.01)
 
 # Extract PercentageWithCells at Day 1
-cells_day1 <- summary_df3_survived %>%
-  filter(DayNumber == 1) %>%
-  select(TREATMENT, ReefMom, SymbiontTreatment, Cross, PercentageWithCells_adj) %>%
+cells_day1 <- summary_df2_survived %>%
+  filter(TIMEPOINT == 1) %>%
+  dplyr::select(TREATMENT, ReefMom, SymbiontTreatment, Cross, PercentageWithCells_adj) %>%
   rename(CellsDay1 = PercentageWithCells_adj)
 
 # Extract PercentageWithCells at Day 22
-cells_day22 <- summary_df3_survived %>%
-  filter(DayNumber == 22) %>%
-  select(TREATMENT, ReefMom, SymbiontTreatment, Cross, PercentageWithCells_adj) %>%
+cells_day22 <- summary_df2_survived %>%
+  filter(TIMEPOINT == 22) %>%
+  dplyr::select(TREATMENT, ReefMom, SymbiontTreatment, Cross, PercentageWithCells_adj) %>%
   rename(CellsDay22 = PercentageWithCells_adj)
 
 # Join Day 1 and Day 22 data
@@ -3923,29 +4070,56 @@ cells_change_df <- left_join(cells_day1, cells_day22,
 
 # Calculate log change
 cells_change_df <- cells_change_df <- cells_change_df %>%
-  mutate(LogChangeCells = log(CellsDay22) - log(CellsDay1))
+  mutate(PercChangeCells_Acq = (CellsDay22) - (CellsDay1))
 
-log_change_summary2 <- cells_change_df %>%
+perc_change_summary2 <- cells_change_df %>%
+  filter(TREATMENT != "T3") %>%  # Remove T3 before summary
   group_by(TREATMENT, Cross, SymbiontTreatment, ReefMom) %>%
   summarise(
-    mean_perc_change = mean(LogChangeCells, na.rm = TRUE),
-    se_perc_change = sd(LogChangeCells, na.rm = TRUE) / sqrt(n()),
+    mean_perc_change = mean(PercChangeCells_Acq, na.rm = TRUE),
+    se_perc_change = sd(PercChangeCells_Acq, na.rm = TRUE) / sqrt(n()),
     .groups = "drop"
   )
 
 # Reorder treatment levels
-log_change_summary2 <- log_change_summary2 %>%
-  mutate(Treatment = factor(TREATMENT, levels = c("T1", "T2", "T3")))
+perc_change_summary2 <- perc_change_summary2 %>%
+  mutate(Treatment = factor(TREATMENT, levels = c("T1", "T2")))
 
-log_change_plot3 <- ggplot(log_change_summary2, aes(x = Treatment, y = mean_perc_change,
-                                                  color = Cross, shape = SymbiontTreatment)) +
-  geom_point(size = 4) +
-  geom_errorbar(aes(ymin = mean_perc_change - se_perc_change,
-                    ymax = mean_perc_change + se_perc_change), width = 0.2) +
+perc_change_plot3 <- ggplot(perc_change_summary2, aes(
+  x = Treatment,
+  y = mean_perc_change,
+  fill = Cross,
+  shape = SymbiontTreatment
+)) +
+  # Error bars colored by Cross
+  geom_errorbar(aes(
+    ymin = mean_perc_change - se_perc_change,
+    ymax = mean_perc_change + se_perc_change,
+    color = Cross
+  ), width = 0.2) +
+
+  # Points with black border and colored fill
+  geom_point(
+    size = 4,
+    stroke = 1.2,
+    color = "black"  # black outline
+  ) +
+
   geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +
+
+  # Manual scales for fill and shape
+  scale_fill_manual(values = custom_colors) +
   scale_color_manual(values = custom_colors) +
-  labs(x = "Temperature (Treatment)", y = "Percent Change in % Larvae With Cells (± s.e.)",
-       title = "Change in Symbiotic Larvae from Day 1 to 22") +
+  scale_shape_manual(values = c(21, 22)) +
+
+  labs(
+    x = "Temperature (Treatment)",
+    y = "Percent Change in % Larvae With Cells (± s.e.)",
+    title = "Change in Symbiotic Larvae from Day 1 to 22"
+  ) +
+
+  facet_wrap(~ ReefMom, nrow = 7) +
+
   theme_minimal() +
   theme(
     legend.position = "right",
@@ -3953,24 +4127,82 @@ log_change_plot3 <- ggplot(log_change_summary2, aes(x = Treatment, y = mean_perc
     panel.grid.minor = element_blank(),
     axis.line = element_line(color = "black"),
     axis.ticks = element_line(color = "black")
-  ) +
-  facet_wrap(~ ReefMom, nrow = 7)
+  )
+
 
 # Display the faceted plot
-print(log_change_plot3)
+print(perc_change_plot3)
+
+perc_change_plot3 <- ggplot(perc_change_summary2, aes(
+  x = Treatment,
+  y = mean_perc_change,
+  fill = Cross,
+  shape = SymbiontTreatment
+)) +
+  # Lines connecting points of same Cross and SymbiontTreatment
+  geom_line(aes(
+    group = interaction(Cross, SymbiontTreatment),
+    color = Cross
+  ), linewidth = 0.8) +
+
+  # Error bars colored by Cross
+  geom_errorbar(aes(
+    ymin = mean_perc_change - se_perc_change,
+    ymax = mean_perc_change + se_perc_change,
+    color = Cross
+  ), width = 0.2) +
+
+  # Points with colored fill and black border
+  geom_point(
+    size = 4,
+    stroke = 1.2,
+    color = "black"
+  ) +
+
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +
+
+  # Scales and labels
+  scale_fill_manual(values = custom_colors) +
+  scale_color_manual(values = custom_colors) +
+  scale_shape_manual(values = c(21, 24)) +
+
+  labs(
+    x = "Temperature (Treatment)",
+    y = "Percent Change in % Larvae With Cells (± s.e.)",
+    title = "Change in Symbiotic Larvae from Day 1 to 22"
+  ) +
+
+  facet_wrap(~ ReefMom, nrow = 7) +
+
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black"),
+    axis.ticks = element_line(color = "black")
+  )
+
 ```
 Combine all of the plots
 ```{r}
 # Combine the three plots into one figure
-combined_plot_pct <- pct_plot + log_change_plot2 + log_change_plot3 + 
-  plot_layout(ncol = 3)  # Stack them vertically (1 column)
+combined_plot_pct <- 
+  pct_plot + 
+    theme(legend.position = "none") +
+  log_change_plot2 + 
+    theme(legend.position = "none") +
+  perc_change_plot3 + 
+    theme(legend.position = "none") +
+  plot_layout(ncol = 3)
+
 
 # Display the combined plot
 print(combined_plot_pct)
 
-ggsave("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/combined_plot_pct.png", 
+ggsave("C:/Users/bellb/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/combined_plot_pct_updated.png", 
        plot = combined_plot_pct,  # Save the most recent plot
-       width = 15,          # Set the width of the plot (in inches)
+       width = 10,          # Set the width of the plot (in inches)
        height = 7,          # Set the height of the plot (in inches)
        dpi = 300)           # Set the resolution (300 dpi is good for publications)  
 ```
@@ -3990,11 +4222,9 @@ df_subset <- df_subset %>%
     TRUE ~ "WW"
   ))
 
-# Check n per group (optional diagnostic)
-df_subset %>%
-  group_by(Timepoint, SymbiontTreatment, Treatment) %>%
-  summarise(n = sum(!is.na(Cell_Density))) %>%
-  print(n = Inf)
+# Set factor levels BEFORE plotting, to retain all x-axis categories
+df_subset <- df_subset %>%
+  mutate(Treatment = factor(Treatment, levels = c("Ambient", "31", "35.5")))
 
 # Filter for Day 22 and summarize
 summary_stats_day22_cd <- df_subset %>%
@@ -4010,18 +4240,50 @@ summary_stats_day22_cd <- df_subset %>%
   ) %>%
   ungroup()
 
+# Identify all combinations that should be present
+all_combos <- expand.grid(
+  Treatment = c("Ambient", "31", "35.5"),
+  SymbiontTreatment = unique(summary_stats_day22_cd$SymbiontTreatment),
+  Cross = unique(summary_stats_day22_cd$Cross)
+)
+
+# Join with existing data
+summary_stats_day22_cd <- all_combos %>%
+  left_join(summary_stats_day22_cd, by = c("Treatment", "SymbiontTreatment", "Cross")) %>%
+  mutate(
+    Timepoint = 22,
+    mean_cd = ifelse(is.na(mean_cd), 0, mean_cd),
+    se = ifelse(is.na(se), 0, se)
+  )
+
 # Define custom colors
 custom_colors <- c("CC" = "#1f77b4", "WW" = "#ff7f0e")
 
 # Plot main Cell Density plot
-cd_plot <- ggplot(summary_stats_day22_cd, aes(x = Treatment, y = mean_cd, 
-                                              color = Cross, shape = SymbiontTreatment)) +
-  geom_point(size = 4) +
-  geom_errorbar(aes(ymin = mean_cd - se, ymax = mean_cd + se), width = 0.2) +
+cd_plot <- ggplot(summary_stats_day22_cd, aes(
+  x = Treatment,
+  y = mean_cd,
+  fill = Cross,                    # fill color by Cross
+  shape = SymbiontTreatment        # shape by symbiont
+)) +
+  geom_errorbar(
+    aes(ymin = mean_cd - se, ymax = mean_cd + se, color = Cross), 
+    width = 0.2
+  ) +
+  geom_point(
+    size = 4,
+    stroke = 1.2,
+    color = "black"                # black border
+  ) +
   geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +
-  scale_color_manual(values = custom_colors) +
-  labs(x = "Temperature Treatment", y = "Mean Cell Density (± s.e.)",
-       title = "Mean Cell Density at Final Timepoint (22)") +
+  scale_fill_manual(values = custom_colors) +
+  scale_color_manual(values = custom_colors) +  # for error bars
+  scale_shape_manual(values = c("C" = 21, "D" = 24)) +
+  labs(
+    x = "Temperature Treatment",
+    y = "Mean Cell Density (± s.e.)",
+    title = "Mean Cell Density at Final Timepoint (22)"
+  ) +
   theme_minimal() +
   theme(
     legend.position = "right",
@@ -4031,9 +4293,10 @@ cd_plot <- ggplot(summary_stats_day22_cd, aes(x = Treatment, y = mean_cd,
     axis.ticks = element_line(color = "black")
   )
 
+
 print(cd_plot)
 
-ggsave("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/cell_density_mean_plot.png", plot = cd_plot,
+ggsave("C:/Users/bellb/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/cell_density_mean_plot.png", plot = cd_plot,
        width = 6, height = 3, dpi = 300)
 
 #Mean cell density by Treatment
@@ -4096,12 +4359,6 @@ library(ggplot2)
 library(patchwork)
 
 # Make sure Cross is added and standardized at the beginning
-df_subset <- df_subset %>%
-  mutate(Cross = case_when(
-    ReefMom %in% c("BT2", "BT4", "BT8") ~ "CC",
-    TRUE ~ "WW"
-  ))
-
 class(df_subset$Cross)
 df_subset$Cross <- factor(df_subset$Cross, levels = c("CC", "WW"))
 levels(df_subset$Cross)
@@ -4129,32 +4386,46 @@ cells_change_df <- left_join(cells_day1, cells_day22,
 cells_change_df <- cells_change_df %>%
   mutate(PercChangeCells = 100 * (CellsDay22 - CellsDay1) / CellsDay1)
 
-cells_change_df <- cells_change_df %>%
-  mutate(LogChangeCells = log(CellsDay22) - log(CellsDay1))
-
 # Define custom colors
 custom_colors <- c("CC" = "#1f77b4", "WW" = "#ff7f0e")
 
 # Summarize percent change by Treatment, Cross, SymbiontTreatment
-log_change_summary <- cells_change_df %>%
+perc_change_summary <- cells_change_df %>%
   group_by(Treatment, Cross, SymbiontTreatment) %>%
   summarise(
-    mean_log_change = mean(LogChangeCells, na.rm = TRUE),
-    se_log_change = sd(LogChangeCells, na.rm = TRUE) / sqrt(n()),
+    mean_perc_change = mean(PercChangeCells, na.rm = TRUE),
+    se_perc_change = sd(PercChangeCells, na.rm = TRUE) / sqrt(n()),
     .groups = "drop"
   )
 
 
 # Main plot
-log_change_plot <- ggplot(log_change_summary, aes(x = Treatment, y = mean_log_change,
-                                                    color = Cross, shape = SymbiontTreatment)) +
-  geom_point(size = 4) +
-  geom_errorbar(aes(ymin = mean_log_change - se_log_change,
-                    ymax = mean_log_change + se_log_change), width = 0.2) +
+perc_change_plot_cells <- ggplot(perc_change_summary, aes(
+  x = Treatment,
+  y = mean_perc_change,
+  fill = Cross,
+  shape = SymbiontTreatment
+)) +
+  geom_errorbar(
+    aes(ymin = mean_perc_change - se_perc_change,
+        ymax = mean_perc_change + se_perc_change,
+        color = Cross),
+    width = 0.2
+  ) +
+  geom_point(
+    size = 4,
+    stroke = 1.2,
+    color = "black"  # black border
+  ) +
   geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +
-  scale_color_manual(values = custom_colors) +
-  labs(x = "Temperature (Treatment)", y = "Log Change in Cell Density (± s.e.)",
-       title = "Log Change in Cell Density from Timepoint 1 to 22") +
+  scale_fill_manual(values = custom_colors) +
+  scale_color_manual(values = custom_colors) +  # for error bars
+  scale_shape_manual(values = c("C" = 21, "D" = 24)) +  # shape for symbionts
+  labs(
+    x = "Temperature (Treatment)",
+    y = "Percent Change in Cell Density (± s.e.)",
+    title = "Percent Change in Cell Density from Timepoint 1 to 22"
+  ) +
   theme_minimal() +
   theme(
     legend.position = "right",
@@ -4164,21 +4435,23 @@ log_change_plot <- ggplot(log_change_summary, aes(x = Treatment, y = mean_log_ch
     axis.ticks = element_line(color = "black")
   )
 
-print(log_change_plot)
+
+print(perc_change_plot_cells)
 
 #Log change by Treatment only
 inset1_df <- cells_change_df %>%
+  filter(Treatment != "35.5") %>% 
   group_by(Treatment) %>%
   summarise(
-    mean_log_change = mean(LogChangeCells, na.rm = TRUE),
-    se_log_change = sd(LogChangeCells, na.rm = TRUE) / sqrt(n()),
+    mean_perc_change = mean(PercChangeCells, na.rm = TRUE),
+    se_perc_change = sd(PercChangeCells, na.rm = TRUE) / sqrt(n()),
     .groups = "drop"
   ) %>%
   mutate(Treatment = factor(Treatment, levels = c("Ambient", "31", "35.5")))
 
-inset1_plot <- ggplot(inset1_df, aes(x = Treatment, y = mean_log_change)) +
+inset1_plot <- ggplot(inset1_df, aes(x = Treatment, y = mean_perc_change)) +
   geom_point(size = 4, shape = 1, color = "black", fill = NA, stroke = 1.5) +
-  geom_errorbar(aes(ymin = mean_log_change - se_log_change, ymax = mean_log_change + se_log_change), width = 0.2) +
+  geom_errorbar(aes(ymin = mean_perc_change - se_perc_change, ymax = mean_perc_change + se_perc_change), width = 0.2) +
   geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +
   labs(title = "Mean Log Change by Treatment", y = "Log Change (± s.e.)", x = NULL) +
   theme_minimal() +
@@ -4194,17 +4467,18 @@ inset1_plot <- ggplot(inset1_df, aes(x = Treatment, y = mean_log_change)) +
 
 # Inset 2: Mean log change by Treatment and SymbiontTreatment (point + error bars)
 inset2_df <- cells_change_df %>%
+  filter(Treatment != "35.5") %>%
   group_by(Treatment, SymbiontTreatment) %>%
   summarise(
-    mean_log_change = mean(LogChangeCells, na.rm = TRUE),
-    se_log_change = sd(LogChangeCells, na.rm = TRUE) / sqrt(n()),
+    mean_perc_change = mean(PercChangeCells, na.rm = TRUE),
+    se_perc_change = sd(PercChangeCells, na.rm = TRUE) / sqrt(n()),
     .groups = "drop"
   ) %>%
   mutate(Treatment = factor(Treatment, levels = c("Ambient", "31", "35.5")))
 
-inset2_plot <- ggplot(inset2_df, aes(x = Treatment, y = mean_log_change, shape = SymbiontTreatment)) +
+inset2_plot <- ggplot(inset2_df, aes(x = Treatment, y = mean_perc_change, shape = SymbiontTreatment)) +
   geom_point(size = 4, fill = NA, stroke = 1.5) +
-  geom_errorbar(aes(ymin = mean_log_change - se_log_change, ymax = mean_log_change + se_log_change), width = 0.2) +
+  geom_errorbar(aes(ymin = mean_perc_change - se_perc_change, ymax = mean_perc_change + se_perc_change), width = 0.2) +
   geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +
   labs(x = NULL, y = "Log Change (± s.e.)", title = "Log Change by Treatment × Symbiont") +
   theme_minimal() +
@@ -4221,7 +4495,7 @@ combined_cd_plot2 <- inset1_plot + inset2_plot + plot_layout(ncol = 2)
 print(combined_cd_plot2)
 
 # Save combined inset plot
-ggsave("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/combined_plot_cell_density_logchange_inset.png", plot = combined_cd_plot2,
+ggsave("C:/Users/bellb/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/combined_plot_cell_density_percchange_inset.png", plot = combined_cd_plot2,
        width = 6, height = 3, dpi = 300)
 
 
@@ -4231,26 +4505,43 @@ ggsave("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Sp
 
 ```{r}
 # Summarize log change including ReefMom
-log_change_summary_by_reef <- cells_change_df %>%
+perc_change_summary_by_reef <- cells_change_df %>%
+  filter(Treatment != "35.5") %>%
   group_by(Treatment, Cross, SymbiontTreatment, ReefMom) %>%
   summarise(
-    mean_log_change = mean(LogChangeCells, na.rm = TRUE),
-    se_log_change = sd(LogChangeCells, na.rm = TRUE) / sqrt(n()),
+    mean_perc_change = mean(PercChangeCells, na.rm = TRUE),
+    se_perc_change = sd(PercChangeCells, na.rm = TRUE) / sqrt(n()),
     .groups = "drop"
   ) %>%
   mutate(Treatment = factor(Treatment, levels = c("Ambient", "31", "35.5")))
 
 # Plot faceted by ReefMom
-log_change_plot_faceted <- ggplot(log_change_summary_by_reef, 
-                                 aes(x = Treatment, y = mean_log_change,
-                                     color = Cross, shape = SymbiontTreatment)) +
-  geom_point(size = 4) +
-  geom_errorbar(aes(ymin = mean_log_change - se_log_change,
-                    ymax = mean_log_change + se_log_change), width = 0.2) +
+perc_change_plot_faceted <- ggplot(perc_change_summary_by_reef, 
+                                   aes(x = Treatment, y = mean_perc_change,
+                                       fill = Cross, shape = SymbiontTreatment)) +
+  # Connect points with same color as fill
+  geom_line(aes(group = interaction(Cross, SymbiontTreatment), color = Cross), 
+            size = 0.8) +
+  
+  # Error bars with Cross color
+  geom_errorbar(aes(ymin = mean_perc_change - se_perc_change,
+                    ymax = mean_perc_change + se_perc_change,
+                    color = Cross), 
+                width = 0.2) +
+  
+  # Points with black border and colored fill
+  geom_point(size = 4, stroke = 1.2, color = "black") +
+  
   geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +
+  
+  scale_fill_manual(values = custom_colors) +
   scale_color_manual(values = custom_colors) +
-  labs(x = "Temperature (Treatment)", y = "Log Change in Cell Density (± s.e.)",
-       title = "Change in Cell Density from Timepoint 1 to 22") +
+  scale_shape_manual(values = c("C" = 21, "D" = 24)) +  # triangle and circle
+
+  labs(x = "Temperature (Treatment)", 
+       y = "Percent Change in Cell Density (± s.e.)",
+       title = "Percent Change in Cell Density from Timepoint 1 to 22") +
+  
   theme_minimal() +
   theme(
     legend.position = "right",
@@ -4259,24 +4550,29 @@ log_change_plot_faceted <- ggplot(log_change_summary_by_reef,
     axis.line = element_line(color = "black"),
     axis.ticks = element_line(color = "black")
   ) +
-  facet_wrap(~ ReefMom, nrow = 7) + coord_cartesian(ylim = c(0, 30))
+  facet_wrap(~ ReefMom, nrow = 7)
 
-print(log_change_plot_faceted)
+print(perc_change_plot_faceted)
+
 
 ```
 
 Combine all of the plots
 ```{r}
 # Combine the three plots into one figure
-combined_plot_cd <- cd_plot + log_change_plot + log_change_plot_faceted + 
+combined_plot_cd <- cd_plot + 
+    theme(legend.position = "none") +
+  perc_change_plot_cells + 
+    theme(legend.position = "none") + perc_change_plot_faceted + 
+    theme(legend.position = "none") +
   plot_layout(ncol = 3)  # Stack them vertically (1 column)
 
 # Display the combined plot
 print(combined_plot_cd)
 
-ggsave("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/combined_plot_cd.png", 
+ggsave("C:/Users/bellb/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/combined_plot_cd.png", 
        plot = combined_plot_cd,  # Save the most recent plot
-       width = 15,          # Set the width of the plot (in inches)
+       width = 10,          # Set the width of the plot (in inches)
        height = 7,          # Set the height of the plot (in inches)
        dpi = 300)           # Set the resolution (300 dpi is good for publications)  
 ```
