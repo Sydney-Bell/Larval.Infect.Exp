@@ -16,6 +16,7 @@ saveRDS(df_with_extremes, file = "df_with_extremes.rds")
 ```{r}
 library('ggplot2'); packageVersion('ggplot2') #version 3.5.0
 library(dplyr)
+library(tidyr)
 
 setwd("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment")
 
@@ -138,6 +139,13 @@ df_Surv <- df_Surv %>%
 df_Surv <- df_Surv %>%
   filter(Dead_Larvae >= 0)
 
+df_Surv <- df_Surv %>%
+  mutate(
+    Percent_Survival = (No.LarvaeInObserved / No.LarvaeInStart) * 100
+  ) %>%
+  filter(!is.na(Percent_Survival))
+
+
 # Temp coding based on Treatment
 df_Surv <- df_Surv %>%
   mutate(Temp = case_when(
@@ -196,17 +204,49 @@ cells_long <- cells %>%
 ```{r}
 #Family
 # Plot using ggplot2 with a smooth curve, facet by Treatment, and custom layout
-plotfam <- ggplot(df, aes(x = Timepoint, y = survival_percentage, color = as.factor(Family))) +
-  geom_smooth(method = "loess", se = FALSE) +  # Use loess method for smoothing
-  facet_wrap(~Treatment, nrow = 1, scales = "free_x") +  # Facet by Treatment with one row
-  labs(x = "Timepoint", y = "Survival %", color = "Tube ID") +
+
+df_Surv$Timepoint_num <- as.numeric(as.character(df_Surv$Timepoint))
+
+
+ggplot(df_Surv, aes(x = Timepoint_num, y = Percent_Survival,
+                    color = as.factor(Family))) +
+  geom_point() +
+  geom_line() +
+  facet_wrap(~Treatment, nrow = 1, scales = "free_x") +
+  labs(x = "Timepoint (days)", y = "Percent Survival (%)", color = "Family") +
   theme_minimal() +
   theme(
-    legend.position = "bottom",  # Move legend to the bottom
-    strip.placement = "outside",  # Place facet labels outside the plot area
-    strip.background = element_blank()  # Remove background of facet labels
+    legend.position = "bottom",
+    strip.placement = "outside",
+    strip.background = element_blank()
   )
-plotfam
+
+surv_summary <- df_Surv %>%
+  group_by(Family, Treatment, Timepoint_num) %>%
+  summarise(
+    mean_survival = mean(Percent_Survival, na.rm = TRUE),
+    se_survival = sd(Percent_Survival, na.rm = TRUE) / sqrt(n()),
+    .groups = "drop"
+  )
+
+ggplot(surv_summary, aes(x = Timepoint_num, y = mean_survival, color = Family, group = Family)) +
+  geom_point() +
+  geom_line() +
+  geom_errorbar(aes(ymin = mean_survival - se_survival, ymax = mean_survival + se_survival), width = 0.5) +
+  facet_wrap(~Treatment, nrow = 1) +
+  labs(x = "Timepoint (days)", y = "Mean Percent Survival (%)") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+surv_summary_22 <- df_Surv %>%
+  filter(Timepoint == "22") %>%
+  group_by(Treatment) %>%
+  summarise(
+    mean_survival = mean(Percent_Survival, na.rm = TRUE),
+    se_survival = sd(Percent_Survival, na.rm = TRUE) / sqrt(n())
+  )
+
+surv_summary_22
 
 #plotGen
 plotGen <- ggplot(df, aes(x = Timepoint, y = survival_percentage, color = as.factor(SymbiontTreatment))) +
@@ -527,6 +567,41 @@ Cox model: with Treatment and ReefMom
 ```{r}
 #Install package survival
 library(survival)
+
+str(metadata)
+
+# Determine the class of the Factors (not the covariates):
+class(metadata$Treatment)
+class(metadata$SymbiontTreatment)
+class(metadata$ReefMom)
+#If any of the factors is not a “factor”, redefine it as a factor:
+metadata$Treatment <- factor(metadata$Treatment)
+metadata$SymbiontTreatment <- factor(metadata$SymbiontTreatment)
+metadata$ReefMom <- factor(metadata$ReefMom)
+attach (metadata)
+
+# Create the Status column
+# Zero = Alive
+metadata$Status <- ifelse(metadata$`Alive..Dead..Sampled` == "Alive", 0, 1)
+# Check for missing values in the columns used in the model
+sum(is.na(metadata$Timepoint))
+sum(is.na(metadata$Status))
+sum(is.na(metadata$Treatment))
+sum(is.na(metadata$SymbiontTreatment))
+sum(is.na(metadata$ReefMom))
+
+# Keep the entire metadata dataset, but filter out rows with NA in specific columns
+metadata_clean <- metadata %>%
+  filter(!is.na(Timepoint) & !is.na(Status) & !is.na(Treatment) & !is.na(SymbiontTreatment) & !is.na(ReefMom))
+
+# Check the dimensions to ensure you retain all necessary columns
+dim(metadata_clean)  # Check number of rows and columns
+
+# Verify the changes
+head(metadata_clean)
+
+metadata_clean$Timepoint <- as.numeric(as.character(metadata_clean$Timepoint))
+
 X<-cbind(metadata_clean$Treatment, metadata_clean$SymbiontTreatment, metadata_clean$ReefMom)# if you don’t have covariates, do not include them
 # if observations are right censored:
 cox<- coxph (Surv(Timepoint, Status)~ X, method='breslow', data = metadata_clean)
@@ -600,7 +675,6 @@ km
 summary(km)
 
 # Plot the survival curves
-library(survival)
 km$strata
 
 # Plot the Kaplan-Meier curve
@@ -683,6 +757,13 @@ pairs
 symnum(pairs$p.value, cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, 0.1, 1),
    symbols = c("****", "***", "**", "*", "+", " "),
    abbr.colnames = FALSE, na = "")
+
+# Extract survival probabilities at a specific time, e.g., time = 22
+# You can do this using the 'summary()' function with the 'time' argument
+surv_summary <- summary(km2, times = 22)
+
+# Print the survival probability at time 22
+print(surv_summary$surv)  # This gives the survival probabilities
 
 
 #########
@@ -777,6 +858,76 @@ survival_curves_facet_Symb <- ggsurv$plot +
 
 #save
 ggsave("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/survival_curves_facet_Symb.png", plot = survival_curves_facet_Symb, width = 10, height = 20, dpi = 300)
+
+# Extract survival probabilities at a specific time, e.g., time = 22
+# You can do this using the 'summary()' function with the 'time' argument
+surv_summary <- summary(km.symb, times = 22)
+
+# Print the survival probability at time 22
+print(surv_summary$surv)  # This gives the survival probabilities
+
+# Fit survival by Treatment + ReefMom + SymbiontTreatment
+km.symb2 <- survfit(Surv(Timepoint, Status) ~ Treatment + ReefMom, data = metadata_clean)
+surv_summary <- summary(km.symb2, times = 15)
+
+# Subset for 27.5°C
+data_27 <- metadata_clean %>% filter(Treatment == "Ambient")
+
+# Subset for 31°C
+data_31 <- metadata_clean %>% filter(Treatment == "31")
+
+# KM log-rank test at 27.5°C
+survdiff(Surv(Timepoint, Status) ~ ReefMom, data = data_27)
+
+# KM log-rank test at 31°C
+survdiff(Surv(Timepoint, Status) ~ ReefMom, data = data_31)
+
+survdiff(Surv(Timepoint, Status) ~ Treatment * ReefMom, data = metadata_clean)
+
+###
+#Simplify figure to just Treatment
+###
+
+# Ensure Treatment is a factor with correct order
+metadata_clean$Treatment <- factor(metadata_clean$Treatment,
+                                   levels = c("Ambient", "31", "35.5"),
+                                   labels = c("27.5°C", "31°C", "35.5°C"))
+
+# Fit KM model by Treatment only
+km_fit <- survfit(Surv(Timepoint, Status) ~ Treatment, data = metadata_clean)
+
+# Define treatment colors
+treatment_colors <- c(
+  "Treatment=27.5°C" = "#3288bd",
+  "Treatment=31°C"   = "#fee08b",
+  "Treatment=35.5°C" = "#d53e4f"
+)
+
+# Plot
+km_plot <- ggsurvplot(
+  km_fit,
+  data = metadata_clean,
+  conf.int = TRUE,
+  pval = TRUE,
+  palette = treatment_colors,
+  legend.title = "Temperature",
+  xlab = "Time (days)",
+  ylab = "Survival probability",
+  risk.table = FALSE
+)
+
+# Display plot
+print(km_plot)
+
+# Save if needed
+ggsave("C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/KM_survival_by_Treatment.png", plot = km_plot$plot, width = 8, height = 6, dpi = 300)
+
+# Pairwise comparisons with log-rank test
+pairwise_res <- pairwise_survdiff(Surv(Timepoint, Status) ~ Treatment,
+                                  data = metadata_clean,
+                                  p.adjust.method = "BH")  # Benjamini-Hochberg correction for multiple testing
+
+print(pairwise_res$p.value)
 
 ```
 ##Survival Analysis
@@ -888,7 +1039,7 @@ symnum(pair$p.value, cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, 0.1, 1),
 # You can do this using the 'summary()' function with the 'time' argument
 surv_summary <- summary(km5, times = 22)
 
-# Print the survival probability at time 50
+# Print the survival probability at time 22
 print(surv_summary$surv)  # This gives the survival probabilities
 
 #at day 22:
