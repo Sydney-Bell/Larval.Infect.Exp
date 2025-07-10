@@ -290,7 +290,6 @@ plotCul
 
 
 ```
-
 ## Cell Density: Exploratory Bar Graph
 ```{r}
 
@@ -328,12 +327,9 @@ cellden = ggplot(combined_data, aes(x = Date, y = Cells, group = TubeID, color =
 
 cellden
 #ggsave("celldensity.jpg", plot = cellden)
-
-
 ```
 ## Cell Density: Boxplot by Cross
 ```{r}
-
 # Create the box plot
 celldenboxplot = ggplot(cells_long, aes(x = Cross, y = CellDensity, fill = Treatment)) +
   geom_boxplot() +
@@ -344,7 +340,9 @@ celldenboxplot = ggplot(cells_long, aes(x = Cross, y = CellDensity, fill = Treat
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
   scale_fill_manual(values = treatment_colors)
 
-ggsave("celldensityboxplot.jpg", plot = boxplot, width = 25, height = 15)
+celldenboxplot
+
+#ggsave("celldensityboxplot.jpg", plot = boxplot, width = 25, height = 15)
 ```
 ## Cell Density: Boxplot by Reef, Cell Type, and Treatment
 ```{r}
@@ -362,6 +360,7 @@ celldenboxplot <- ggplot(cells_long, aes(x = Reef, y = CellDensity, fill = CellT
     strip.text = element_text(face = "bold")
   )
 
+celldenboxplot
 
 # Load necessary library
 library(stats)
@@ -545,6 +544,9 @@ tukey_result <- pairs(emm, adjust = "tukey")
 
 # Print the results
 print(tukey_result)
+tukey_df <- as.data.frame(tukey_result)
+print(tukey_df)
+write.csv(tukey_df, "C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/tukey_posthoc_results.csv", row.names = FALSE)
 
 # Create boxplot with facets by CellType and colors by Treatment
 cells_long$Treatment <- factor(cells_long$Treatment, levels = c("Ambient", "31", "35.5"))
@@ -562,6 +564,138 @@ ggplot(cells_long, aes(x = Treatment, y = CellDensity, fill = Treatment)) +
   scale_fill_manual(values = c("Ambient" = "green","31" = "orange", "35.5" = "red"))
 
 ```
+##Cell Density Boxplot for Publication
+```{r}
+library(ggplot2)
+library(ggpubr)  # for stat_compare_means
+library(dplyr)
+
+# 1. Recode Treatment factor levels with degree symbols
+cells_long$Treatment <- factor(cells_long$Treatment,
+    levels = c("Ambient", "31", "35.5"),
+    labels = c("27.5°C", "31°C", "35.5°C"))
+
+# 2. Recode CellType
+cells_long$CellType <- recode(cells_long$CellType,
+    "C" = "C",
+    "D" = "D"
+)
+
+# Recreate Group safely
+cells_long$Group <- paste0(cells_long$Treatment, "_", cells_long$CellType)
+cells_long$Group <- factor(cells_long$Group)
+
+# Check that it worked:
+table(cells_long$Group)
+
+# 3. Define comparisons for p-values
+my_comparisons <- list(
+  c("27.5°C_C", "27.5°C_D"),
+  c("31°C_C", "31°C_D"),
+  c("35.5°C_C", "35.5°C_D"),    # compare symbionts at 35.5°C
+  c("27.5°C_C", "31°C_C"),
+  c("31°C_C", "35.5°C_C"),      # compare temperatures for Cladocopium
+  c("27.5°C_D", "31°C_D"),
+  c("31°C_D", "35.5°C_D"),      # compare temperatures for Durusdinium
+  c("27.5°C_C", "35.5°C_C"),
+  c("27.5°C_D", "35.5°C_D")
+  )
+
+# Calculate p-values
+pvals_df <- lapply(my_comparisons, function(pair) {
+  group1_vals <- filter(cells_long, Group == pair[1])$CellDensity
+  group2_vals <- filter(cells_long, Group == pair[2])$CellDensity
+  
+  p_val <- tryCatch(
+    wilcox.test(group1_vals, group2_vals)$p.value,
+    error = function(e) NA_real_
+  )
+  
+  data.frame(
+    group1 = pair[1],
+    group2 = pair[2],
+    p_value = p_val,
+    comparison = paste(pair, collapse = " vs "),
+    stringsAsFactors = FALSE
+  )
+}) %>% bind_rows()
+
+# Format p-values nicely
+pvals_df <- pvals_df %>%
+  mutate(p_label = ifelse(is.na(p_value), "NA",
+                          ifelse(p_value < 0.001, "p < 0.001", paste0("p = ", signif(p_value, 3)))))
+pvals_df
+
+# Create a data frame of positions for each comparison
+# You need to find the numeric x-axis positions of groups in your plot (1 to 6 for 6 groups)
+
+group_levels <- levels(cells_long$Group)
+
+# Increase the horizontal line height a bit above the vertical lines
+pvals_df <- pvals_df %>%
+  mutate(
+    y_hline = y + 0.00 * max(cells_long$CellDensity),  # horizontal line a bit above y
+    y_label = y_hline + 0.025 * max(cells_long$CellDensity)  # label above horizontal line
+  )
+
+x_labels <- c(
+  expression("27.5°C " * italic("Cladocopium")),
+  expression("27.5°C " * italic("Durusdinium")),
+  expression("31°C " * italic("Cladocopium")),
+  expression("31°C " * italic("Durusdinium")),
+  expression("35.5°C " * italic("Cladocopium")),
+  expression("35.5°C " * italic("Durusdinium"))
+)
+
+legend_labels <- c(
+  "27.5°C_C" = expression("27.5°C " * italic("Cladocopium")),
+  "27.5°C_D" = expression("27.5°C " * italic("Durusdinium")),
+  "31°C_C"   = expression("31°C " * italic("Cladocopium")),
+  "31°C_D"   = expression("31°C " * italic("Durusdinium")),
+  "35.5°C_C" = expression("35.5°C " * italic("Cladocopium")),
+  "35.5°C_D" = expression("35.5°C " * italic("Durusdinium"))
+)
+
+celldensity_boxplot <- ggplot(cells_long, aes(x = Group, y = CellDensity, fill = Group)) +
+  geom_boxplot() +
+  scale_x_discrete(labels = x_labels) +
+  scale_fill_manual(
+    values = c(
+      "27.5°C_C" = "#abd9e9",
+      "31°C_C"   = "#fee08b",
+      "35.5°C_C" = "#d53e4f",
+      "27.5°C_D" = "#3288bd",
+      "31°C_D"   = "gold",
+      "35.5°C_D" = "#a50026"
+    ),
+    labels = unname(as.list(legend_labels))
+  ) +
+  # Your segments & text here, e.g.:
+  geom_segment(data = pvals_df,
+               aes(x = x1, xend = x1, y = y, yend = y_line),
+               inherit.aes = FALSE) +
+  geom_segment(data = pvals_df,
+               aes(x = x2, xend = x2, y = y, yend = y_line),
+               inherit.aes = FALSE) +
+  geom_segment(data = pvals_df,
+               aes(x = x1, xend = x2, y = y_hline, yend = y_hline),
+               inherit.aes = FALSE) +
+  geom_text(data = pvals_df,
+            aes(x = x, y = y_label, label = p_label),
+            inherit.aes = FALSE, size = 4) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12)) +
+  theme(legend.text = element_text(size = 12))
+
+
+ggsave("C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/celldensity_boxplot.png", 
+       plot = celldensity_boxplot,  # Save the most recent plot
+       width = 10,          # Set the width of the plot (in inches)
+       height = 7,          # Set the height of the plot (in inches)
+       dpi = 300)           # Set the resolution (300 dpi is good for publications)  
+```
+
+
 ##Survival Analysis
 Cox model: with Treatment and ReefMom
 ```{r}

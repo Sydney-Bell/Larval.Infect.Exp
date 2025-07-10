@@ -2095,7 +2095,7 @@ print(r2_values.FvFmfam2)
 Fv/Fm - percentage of larvae with symbiont cells
 
 ```{r}
-ipam <- read.csv("C:/Users/bellb/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/Metadata_NingSpawn2024_iPAM.csv")
+ipam <- read.csv("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/Metadata_NingSpawn2024_iPAM.csv")
 str(ipam)
 
 library(dplyr)
@@ -2135,7 +2135,7 @@ ipam <- ipam %>%
   )
 
 # Load metadata summary
-perc_larvae_summary <- read.csv("C:/Users/bellb/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/perc_larvae_summary.csv")
+perc_larvae_summary <- read.csv("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/perc_larvae_summary.csv")
 
 # Make sure TIMEPOINT is the same type in both dataframes (numeric or integer)
 perc_larvae_summary <- perc_larvae_summary %>%
@@ -2188,12 +2188,12 @@ ggplot(ipam, aes(x = TIMEPOINT, y = PercChangeCells, color = TREATMENT)) +
   scale_color_manual(values = c("T1" = "blue", "T2" = "orange", "T3" = "red"))
 
 #Now we want to view differences in symbiont taxa
-# Subset df_clean to UniqueID and SymbiontTreatment and remove duplicates
+# Subset totaldf_long to UniqueID and SymbiontTreatment and remove duplicates
 df_clean_subset <- totaldf_long %>%
   dplyr::select(UniqueID, SymbiontTreatment, ReefMom) %>%
   distinct(UniqueID, .keep_all = TRUE)
 
-# Merge the SymbiontTreatment column from df_clean to ipam by UniqueID
+# Merge the SymbiontTreatment column from totaldf_long to ipam by UniqueID
 ipam_taxa <- ipam %>%
   left_join(df_clean_subset %>% dplyr::select(UniqueID, SymbiontTreatment), by = "UniqueID")
 
@@ -2454,10 +2454,8 @@ ggsave("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Sp
 
 ```
 
-
 Larval Size GLMM with MCMCglmm
 Fold Change
-
 ```{r}
 #fixed effects: symbiont identity, family cross, temperature treatment
 #random effects: replicate, timepoint
