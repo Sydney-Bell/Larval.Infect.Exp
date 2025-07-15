@@ -3832,10 +3832,11 @@ print(summary_df)
 ##########
 # Pairwise comparisons
 ##########
-subset_df_cells$log1p_PercChangeCells <- log1p(subset_df_cells$PercChangeCells)
+subset_df_cells$sign_log_PercChangeCells <- sign(subset_df_cells$PercChangeCells) * 
+                                            log1p(abs(subset_df_cells$PercChangeCells))
 
 model_full <- MCMCglmm(
-  log1p_PercChangeCells ~ SymbiontTreatment * Cross_2 * Treatment,
+  sign_log_PercChangeCells ~ SymbiontTreatment * Cross_2 * Treatment,
   random = ~ Replicate,
   data = subset_df_cells,
   family = "gaussian",
@@ -3904,7 +3905,7 @@ ggplot(pairwise_df, aes(group1, group2, fill = mean_diff)) +
 # Add back-transformed columns and format them nicely
 pairwise_summary <- pairwise_df %>%
   mutate(
-    mean_diff_bt = exp(mean_diff) - 1,
+    mean_diff_bt = sign(mean_diff) * (exp(abs(mean_diff)) - 1),
     lower_bt = exp(lower) - 1,
     upper_bt = exp(upper) - 1,
     mean_diff_bt_fmt = formatC(mean_diff_bt, format = "e", digits = 2),
@@ -3932,6 +3933,103 @@ pairwise_summary <- pairwise_df %>%
   )
 
 write.csv(pairwise_summary, "C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/pairwise_summary_table_celldensity.csv", row.names = FALSE)
+
+###############################################################
+# Now with just Treatment and Cross
+
+# Fit the model
+model_tc <- MCMCglmm(
+  sign_log_PercChangeCells ~ Treatment * Cross_2,
+  random = ~ Replicate,
+  data = subset_df_cells,
+  family = "gaussian",
+  prior = prior,
+  nitt = 50000,
+  burnin = 10000,
+  thin = 20
+)
+
+# New data grid for predictions
+newdat_tc <- expand.grid(
+  Treatment = levels(subset_df_cells$Treatment),
+  Cross_2 = levels(subset_df_cells$Cross_2)
+)
+
+newdat_tc$Treatment <- factor(newdat_tc$Treatment, levels = levels(subset_df_cells$Treatment))
+newdat_tc$Cross_2 <- factor(newdat_tc$Cross_2, levels = levels(subset_df_cells$Cross_2))
+
+# Model matrix for fixed effects (match model columns)
+X_tc <- model.matrix(~ Treatment * Cross_2, data = newdat_tc)
+
+# Subset posterior samples for fixed effects
+Sol_tc <- model_tc$Sol[, colnames(X_tc), drop = FALSE]
+
+# Calculate predicted values per MCMC iteration
+pred_mat_tc <- X_tc %*% t(Sol_tc)  # rows = groups, cols = MCMC samples
+
+# Calculate pairwise differences for all combinations
+pairwise_diff_tc <- combn(nrow(newdat_tc), 2, function(i) {
+  diff_samples <- pred_mat_tc[i[1], ] - pred_mat_tc[i[2], ]
+  data.frame(
+    group1 = paste(as.character(newdat_tc$Treatment[i[1]]), as.character(newdat_tc$Cross_2[i[1]]), sep = "_"),
+    group2 = paste(as.character(newdat_tc$Treatment[i[2]]), as.character(newdat_tc$Cross_2[i[2]]), sep = "_"),
+    mean_diff = mean(diff_samples),
+    lower = quantile(diff_samples, 0.025),
+    upper = quantile(diff_samples, 0.975),
+    pMCMC = 2 * min(mean(diff_samples > 0), mean(diff_samples < 0))
+  )
+}, simplify = FALSE) %>% bind_rows()
+
+# Add significance flag
+pairwise_diff_tc <- pairwise_diff_tc %>%
+  mutate(significant = (lower > 0 | upper < 0))
+
+head(pairwise_diff_tc)
+
+###############################################################
+# Now with just Treatment and SymbiontTreatment
+model_ts <- MCMCglmm(
+  sign_log_PercChangeCells ~ Treatment * SymbiontTreatment,
+  random = ~ Replicate,
+  data = subset_df_cells,
+  family = "gaussian",
+  prior = prior,
+  nitt = 50000,
+  burnin = 10000,
+  thin = 20
+)
+
+newdat_ts <- expand.grid(
+  Treatment = levels(subset_df_cells$Treatment),
+  SymbiontTreatment = levels(subset_df_cells$SymbiontTreatment)
+)
+
+newdat_ts$Treatment <- factor(newdat_ts$Treatment, levels = levels(subset_df_cells$Treatment))
+newdat_ts$SymbiontTreatment <- factor(newdat_ts$SymbiontTreatment, levels = levels(subset_df_cells$SymbiontTreatment))
+
+X_ts <- model.matrix(~ Treatment * SymbiontTreatment, data = newdat_ts)
+Sol_ts <- model_ts$Sol[, colnames(X_ts), drop = FALSE]
+pred_mat_ts <- X_ts %*% t(Sol_ts)
+
+# Pairwise differences same approach as above
+pairwise_diff_ts <- combn(nrow(newdat_ts), 2, function(i) {
+  diff_samples <- pred_mat_ts[i[1], ] - pred_mat_ts[i[2], ]
+  data.frame(
+    group1 = paste(as.character(newdat_ts$Treatment[i[1]]), as.character(newdat_ts$SymbiontTreatment[i[1]]), sep = "_"),
+    group2 = paste(as.character(newdat_ts$Treatment[i[2]]), as.character(newdat_ts$SymbiontTreatment[i[2]]), sep = "_"),
+    mean_diff = mean(diff_samples),
+    lower = quantile(diff_samples, 0.025),
+    upper = quantile(diff_samples, 0.975),
+    pMCMC = 2 * min(mean(diff_samples > 0), mean(diff_samples < 0))
+  )
+}, simplify = FALSE) %>% bind_rows()
+
+
+pairwise_diff_ts <- pairwise_diff_ts %>%
+  mutate(significant = (lower > 0 | upper < 0))
+
+head(pairwise_diff_ts)
+
 ```
 Larval Size with Survivors only
 ```{r}
@@ -4198,19 +4296,40 @@ summary_df <- results_df[, c("Effect",
 print(summary_df)
 
 ##########
-# Pairwise comparisons
+# Pairwise comparisons for survivors (Percent Change)
 ##########
+
+# Step 1: Identify larvae that survived at Timepoint 22
+survivors <- subset_df %>%
+  filter(Timepoint == 22 & Status == 0) %>%
+  pull(UniqueID)
+
+# Step 2: Subset the full dataset to only include those larvae
+subset_survived_to_22 <- subset_df %>%
+  filter(UniqueID %in% survivors)
+
+model_log <- MCMCglmm(
+  fixed = PercChangeSize ~ SymbiontTreatment * Cross_2 * Treatment,
+  random = ~Replicate,
+  data = subset_survived_to_22,
+  family = "gaussian",
+  prior = prior,
+  nitt = 50000,
+  burnin = 10000,
+  thin = 20
+)
+
 # Create new data frame of combinations
 newdat <- expand.grid(
-  SymbiontTreatment = levels(subset_df$SymbiontTreatment),
-  Cross_2 = levels(subset_df$Cross_2),
-  Treatment = levels(subset_df$Treatment)
+  SymbiontTreatment = levels(subset_survived_to_22$SymbiontTreatment),
+  Cross_2 = levels(subset_survived_to_22$Cross_2),
+  Treatment = levels(subset_survived_to_22$Treatment)
 )
 
 # Ensure same factor levels as in model
-newdat$SymbiontTreatment <- factor(newdat$SymbiontTreatment, levels = levels(subset_df$SymbiontTreatment))
-newdat$Cross_2 <- factor(newdat$Cross_2, levels = levels(subset_df$Cross_2))
-newdat$Treatment <- factor(newdat$Treatment, levels = levels(subset_df$Treatment))
+newdat$SymbiontTreatment <- factor(newdat$SymbiontTreatment, levels = levels(subset_survived_to_22$SymbiontTreatment))
+newdat$Cross_2 <- factor(newdat$Cross_2, levels = levels(subset_survived_to_22$Cross_2))
+newdat$Treatment <- factor(newdat$Treatment, levels = levels(subset_survived_to_22$Treatment))
 
 # For clarity in output
 newdat$group <- with(newdat, paste(SymbiontTreatment, Cross_2, Treatment, sep = "_"))
@@ -4219,10 +4338,10 @@ newdat$group <- with(newdat, paste(SymbiontTreatment, Cross_2, Treatment, sep = 
 X <- model.matrix(~ SymbiontTreatment * Cross_2 * Treatment, data = newdat)
 
 # Match columns exactly
-X <- X[, colnames(model_full$Sol), drop = FALSE]
+X <- X[, colnames(model_log$Sol), drop = FALSE]
 
 # Get posterior predictions
-pred_matrix <- X %*% t(model_full$Sol)
+pred_matrix <- X %*% t(model_log$Sol)
 
 # All pairwise group combinations
 group_combos <- combn(1:nrow(newdat), 2, simplify = FALSE)
@@ -4286,7 +4405,7 @@ pairwise_summary <- pairwise_df %>%
     `Significant` = significant_label
   )
 
-write.csv(pairwise_summary, "C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/pairwise_summary_table_fvfm_raw.csv", row.names = FALSE)
+write.csv(pairwise_summary, "C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/pairwise_summary_table_size_raw.csv", row.names = FALSE)
 
 ###############################################################
 # Now with just Treatment and Cross
@@ -4295,7 +4414,7 @@ write.csv(pairwise_summary, "C:/Users/jc980786/OneDrive - James Cook University/
 model_tc <- MCMCglmm(
   PercChangeSize ~ Treatment * Cross_2,
   random = ~ Replicate,
-  data = subset_df,
+  data = subset_survived_to_22,
   family = "gaussian",
   prior = prior,
   nitt = 50000,
@@ -4305,12 +4424,12 @@ model_tc <- MCMCglmm(
 
 # New data grid for predictions
 newdat_tc <- expand.grid(
-  Treatment = levels(subset_df$Treatment),
-  Cross_2 = levels(subset_df$Cross_2)
+  Treatment = levels(subset_survived_to_22$Treatment),
+  Cross_2 = levels(subset_survived_to_22$Cross_2)
 )
 
-newdat_tc$Treatment <- factor(newdat_tc$Treatment, levels = levels(subset_df$Treatment))
-newdat_tc$Cross_2 <- factor(newdat_tc$Cross_2, levels = levels(subset_df$Cross_2))
+newdat_tc$Treatment <- factor(newdat_tc$Treatment, levels = levels(subset_survived_to_22$Treatment))
+newdat_tc$Cross_2 <- factor(newdat_tc$Cross_2, levels = levels(subset_survived_to_22$Cross_2))
 
 # Model matrix for fixed effects (match model columns)
 X_tc <- model.matrix(~ Treatment * Cross_2, data = newdat_tc)
@@ -4345,7 +4464,7 @@ head(pairwise_diff_tc)
 model_ts <- MCMCglmm(
   PercChangeSize ~ Treatment * SymbiontTreatment,
   random = ~ Replicate,
-  data = subset_df,
+  data = subset_survived_to_22,
   family = "gaussian",
   prior = prior,
   nitt = 50000,
@@ -4354,12 +4473,12 @@ model_ts <- MCMCglmm(
 )
 
 newdat_ts <- expand.grid(
-  Treatment = levels(subset_df$Treatment),
-  SymbiontTreatment = levels(subset_df$SymbiontTreatment)
+  Treatment = levels(subset_survived_to_22$Treatment),
+  SymbiontTreatment = levels(subset_survived_to_22$SymbiontTreatment)
 )
 
-newdat_ts$Treatment <- factor(newdat_ts$Treatment, levels = levels(subset_df$Treatment))
-newdat_ts$SymbiontTreatment <- factor(newdat_ts$SymbiontTreatment, levels = levels(subset_df$SymbiontTreatment))
+newdat_ts$Treatment <- factor(newdat_ts$Treatment, levels = levels(subset_survived_to_22$Treatment))
+newdat_ts$SymbiontTreatment <- factor(newdat_ts$SymbiontTreatment, levels = levels(subset_survived_to_22$SymbiontTreatment))
 
 X_ts <- model.matrix(~ Treatment * SymbiontTreatment, data = newdat_ts)
 Sol_ts <- model_ts$Sol[, colnames(X_ts), drop = FALSE]
@@ -4369,14 +4488,15 @@ pred_mat_ts <- X_ts %*% t(Sol_ts)
 pairwise_diff_ts <- combn(nrow(newdat_ts), 2, function(i) {
   diff_samples <- pred_mat_ts[i[1], ] - pred_mat_ts[i[2], ]
   data.frame(
-    group1 = paste(newdat_ts[i[1], ], collapse = "_"),
-    group2 = paste(newdat_ts[i[2], ], collapse = "_"),
+    group1 = paste(as.character(newdat_ts$Treatment[i[1]]), as.character(newdat_ts$SymbiontTreatment[i[1]]), sep = "_"),
+    group2 = paste(as.character(newdat_ts$Treatment[i[2]]), as.character(newdat_ts$SymbiontTreatment[i[2]]), sep = "_"),
     mean_diff = mean(diff_samples),
     lower = quantile(diff_samples, 0.025),
     upper = quantile(diff_samples, 0.975),
     pMCMC = 2 * min(mean(diff_samples > 0), mean(diff_samples < 0))
   )
 }, simplify = FALSE) %>% bind_rows()
+
 
 pairwise_diff_ts <- pairwise_diff_ts %>%
   mutate(significant = (lower > 0 | upper < 0))

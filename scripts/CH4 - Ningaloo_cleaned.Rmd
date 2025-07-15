@@ -765,7 +765,7 @@ library(MCMCglmm)
 #install.packages("lsmeans")
 library(emmeans)
 
-totaldf = read.csv("C:/Users/bellb/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/Metadata_NingSpawn2024_FINAL2.csv", header = TRUE)
+totaldf = read.csv("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/Metadata_NingSpawn2024_FINAL2.csv", header = TRUE)
 str(totaldf)
 
 library(tidyr)
@@ -816,7 +816,7 @@ df_clean <- df %>%
   ))
 
 # Create a UniqueID column by combining Temp and tube.ID columns
-df_clean$UniqueID <- paste0(df_clean$Temp, "V", df_clean$tube.ID...1)
+df_clean$UniqueID <- paste0(df_clean$Temp, "V", df_clean$tube.ID.1)
 
 ```
 
@@ -2189,7 +2189,7 @@ ggplot(ipam, aes(x = TIMEPOINT, y = PercChangeCells, color = TREATMENT)) +
 
 #Now we want to view differences in symbiont taxa
 # Subset totaldf_long to UniqueID and SymbiontTreatment and remove duplicates
-df_clean_subset <- totaldf_long %>%
+df_clean_subset <- df_clean %>%
   dplyr::select(UniqueID, SymbiontTreatment, ReefMom) %>%
   distinct(UniqueID, .keep_all = TRUE)
 
@@ -2198,54 +2198,24 @@ ipam_taxa <- ipam %>%
   left_join(df_clean_subset %>% dplyr::select(UniqueID, SymbiontTreatment), by = "UniqueID")
 
 # Summarize data to include SymbiontTreatment
+ipam_taxa <- ipam_taxa %>%
+  rename(SymbiontTreatment = zoox)
+
 summary_df2 <- ipam_taxa %>%
-  group_by(TIMEPOINT, TREATMENT, SymbiontTreatment) %>%
+  group_by(Timepoint, Treatment, SymbiontTreatment) %>%
   summarize(PercentageWithCells = mean(FvFm > 0, na.rm = TRUE) * 100, .groups = "drop")
 
 # Define custom colors for SymbiontTreatment
 custom_colors <- c("C" = "green", "D" = "red")  # Example: red-orange for "C" and blue for "D"
 
-# Create a mapping of specific dates to days
-date_to_day <- c(
-  "2024-04-11" = 1,
-  "2024-04-14" = 4,
-  "2024-04-22" = 12,
-  "2024-04-29" = 19,
-  "2024-05-02" = 22
-)
+#make timepoint numeric
+summary_df2$Timepoint <- as.numeric(as.character(summary_df2$Timepoint))
 
-# Add a new column to map `Days` to the corresponding numeric day
-summary_df2 <- summary_df2 %>%
-  mutate(DayNumber = as.numeric(date_to_day[as.character(TIMEPOINT)]))  # Map dates to days
-
-# Plot with updated x-axis and custom colors
-ggplot(summary_df2, aes(x = DayNumber, y = PercentageWithCells, color = SymbiontTreatment)) +
+#plot
+ggplot(summary_df2, aes(x = Timepoint, y = PercentageWithCells, color = SymbiontTreatment)) +
   geom_point(alpha = 0.6, size = 2) +  # Scatter plot
   geom_line(aes(group = SymbiontTreatment), alpha = 0.6) +  # Line connecting points
-  facet_wrap(~ TREATMENT) +  # Facets by TREATMENT
-  scale_color_manual(values = custom_colors) +  # Apply custom colors
-  scale_x_continuous(
-    breaks = c(0,2,4,6,8,10,12,14,16,18,20,22),  # Add breaks for specific days
-    labels = c("0","2","4","6","8","10","12","14","16","18","20","22")  # Label days
-  ) +
-  labs(
-    title = "Percentage of Larvae with Cells Over Time",
-    x = "Days",
-    y = "Percentage with Cells (%)",
-    color = "Symbiont Treatment"
-  ) +
-  theme_classic() +  # Clean theme
-  theme(
-    strip.text = element_text(size = 12),  # Facet label size
-    axis.text = element_text(size = 10),  # Axis text size
-    legend.title = element_text(size = 12),  # Legend title size
-    legend.text = element_text(size = 10)   # Legend text size
-  )
-
-ggplot(summary_df2, aes(x = TIMEPOINT, y = PercentageWithCells, color = SymbiontTreatment)) +
-  geom_point(alpha = 0.6, size = 2) +  # Scatter plot
-  geom_line(aes(group = SymbiontTreatment), alpha = 0.6) +  # Line connecting points
-  facet_wrap(~ TREATMENT, scales = "fixed") +  # Facets by TREATMENT with free y-axes
+  facet_wrap(~ Treatment, scales = "fixed") +  # Facets by TREATMENT with free y-axes
   scale_color_manual(values = custom_colors) +  # Apply custom colors
   scale_x_continuous(
     breaks = c(0,2,4,6,8,10,12,14,16,18,20,22),  # Add breaks for specific days
@@ -2269,27 +2239,32 @@ ggplot(summary_df2, aes(x = TIMEPOINT, y = PercentageWithCells, color = Symbiont
 #gives basically the same output as the original
 # Step 1: Identify UniqueIDs present in all three timepoints (1, 4, 22)
 filtered_ipam <- ipam %>%
-  filter(TIMEPOINT %in% c(1, 4, 22))
+  filter(Timepoint %in% c(1, 4, 22))
 
 # Step 3: Merge SymbiontTreatment for surviving larvae
 filtered_ipam <- filtered_ipam %>%
   left_join(df_clean_subset %>% dplyr::select(UniqueID, SymbiontTreatment, ReefMom), by = "UniqueID")
 
 # Step 4: Create the summary dataframe for larvae that survived until timepoint 22
+filtered_ipam <- filtered_ipam %>%
+  rename(SymbiontTreatment = zoox)
+
 ipam_taxa_survived <- filtered_ipam %>%
-  group_by(TIMEPOINT, TREATMENT, ReefMom, SymbiontTreatment, UniqueID) %>%
+  group_by(Timepoint, Treatment, ReefMom, SymbiontTreatment, UniqueID) %>%
   summarize(PercentageWithCells = mean(FvFm > 0, na.rm = TRUE) * 100, .groups = "drop")
 
 # Step 6: Map days to numeric day values
 summary_df2_survived <- ipam_taxa_survived %>%
-  mutate(DayNumber = as.numeric(date_to_day[as.character(TIMEPOINT)]))
+  mutate(DayNumber = as.numeric(date_to_day[as.character(Timepoint)]))
 
 # Step 7: Plot the data for only larvae that survived until timepoint 22 and have data for all three timepoints
-ggplot(summary_df2_survived, aes(x = TIMEPOINT, y = PercentageWithCells,
+summary_df2_survived$Timepoint <- as.numeric(as.character(summary_df2_survived$Timepoint))
+
+ggplot(summary_df2_survived, aes(x = Timepoint, y = PercentageWithCells,
                                color = ReefMom, shape = SymbiontTreatment)) +
   geom_point(alpha = 0.6, size = 2) +  # Scatter plot
   geom_line(aes(group = interaction(ReefMom, SymbiontTreatment)), alpha = 0.6) +  # Line connecting points
-  facet_wrap(~ TREATMENT) +  # Facets by TREATMENT
+  facet_wrap(~ Treatment) +  # Facets by TREATMENT
   scale_color_manual(values = custom_ReefMom_colors) +  # Apply custom colors
   scale_x_continuous(
     breaks = c(0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22),
@@ -2311,33 +2286,6 @@ ggplot(summary_df2_survived, aes(x = TIMEPOINT, y = PercentageWithCells,
   )
 
 
-library(dplyr)
-
-#plot with summary stats for ReefMom
-summary_stats <- ipam_taxa_survived %>%
-  group_by(TIMEPOINT, ReefMom, SymbiontTreatment, TREATMENT) %>%
-  summarise(
-    mean_pct = mean(PercentageWithCells, na.rm = TRUE),
-    se = sd(PercentageWithCells, na.rm = TRUE) / sqrt(sum(!is.na(PercentageWithCells))),
-    ci_lower = mean_pct - qt(0.975, df = sum(!is.na(PercentageWithCells)) - 1) * se,
-ci_upper = mean_pct + qt(0.975, df = sum(!is.na(PercentageWithCells)) - 1) * se,
-    .groups = "drop"
-  )
-
-ggplot(summary_stats, aes(x = TIMEPOINT, y = mean_pct, color = SymbiontTreatment)) +
-  geom_point(size = 3) +
-  geom_line(aes(group = SymbiontTreatment), size = 1) +
-  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper, group = SymbiontTreatment), width = 0.3) +
-  facet_grid(ReefMom ~ TREATMENT) +
-  scale_color_manual(values = c("C" = "#1f77b4", "D" = "#ff7f0e")) +  # adjust colors as you want
-  labs(
-    title = "Percentage of Larvae with Cells Over Time",
-    x = "Days",
-    y = "Mean Percentage with Cells (%)",
-    color = "Symbiont Treatment"
-  ) +
-  theme_classic()
-
 #plot with summary stats for Cross
 # Add Cross column based on ReefMom
 ipam_taxa_survived <- ipam_taxa_survived %>%
@@ -2348,7 +2296,7 @@ ipam_taxa_survived <- ipam_taxa_survived %>%
 
 # Then summarize including Cross instead of ReefMom
 summary_stats <- ipam_taxa_survived %>%
-  group_by(TIMEPOINT, SymbiontTreatment, TREATMENT, Cross) %>%
+  group_by(Timepoint, SymbiontTreatment, Treatment, Cross) %>%
   summarise(
     mean_pct = mean(PercentageWithCells, na.rm = TRUE),
     se = sd(PercentageWithCells, na.rm = TRUE) / sqrt(sum(!is.na(PercentageWithCells))),
@@ -2358,17 +2306,17 @@ summary_stats <- ipam_taxa_survived %>%
   )
 
 
-plot1_perc <- ggplot(summary_stats, aes(x = TIMEPOINT, y = mean_pct, color = Cross, shape = SymbiontTreatment)) +
+plot1_perc <- ggplot(summary_stats, aes(x = Timepoint, y = mean_pct, color = Cross, shape = SymbiontTreatment)) +
   geom_point(size = 3) +
   geom_line(aes(group = SymbiontTreatment), size = 1) +
   geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper, group = SymbiontTreatment), width = 0.3) +
-  facet_grid(Cross ~ TREATMENT) +
+  facet_grid(Cross ~ Treatment) +
   scale_color_manual(values = c("CC" = "#1f77b4", "WW" = "#ff7f0e")) +
   labs(
     title = "Percentage of Larvae with Cells Over Time",
     x = "Days",
     y = "Mean Percentage with Cells (%)",
-    color = "Symbiont Treatment"
+    color = "Population of Origin"
   ) +
   theme_classic()
 
@@ -3742,7 +3690,7 @@ summary_df2_survived <- summary_df2_survived %>%
   ))
 
 summary_df2_survived %>%
-  group_by(TIMEPOINT, SymbiontTreatment, TREATMENT) %>%
+  group_by(Timepoint, SymbiontTreatment, Treatment) %>%
   summarise(n = sum(!is.na(PercentageWithCells))) %>%
   print(n = Inf)
 
@@ -3750,8 +3698,8 @@ str(summary_df2_survived$PercentageWithCells)
 
 # Filter the dataframe to get data for the final timepoint (22)
 summary_stats_day22 <- summary_df2_survived %>%
-  filter(TIMEPOINT == 22) %>%
-  group_by(TIMEPOINT, SymbiontTreatment, TREATMENT, Cross) %>%
+  filter(Timepoint == 22) %>%
+  group_by(Timepoint, SymbiontTreatment, Treatment, Cross) %>%
   summarise(
     mean_pct = mean(PercentageWithCells, na.rm = TRUE),
     n = sum(!is.na(PercentageWithCells)),
@@ -3764,31 +3712,29 @@ summary_stats_day22 <- summary_df2_survived %>%
 
 # Set factor levels BEFORE plotting, to retain all x-axis categories
 summary_stats_day22 <- summary_stats_day22 %>%
-  mutate(TREATMENT = factor(TREATMENT, levels = c("T1", "T2", "T3")))
+  mutate(Treatment = factor(Treatment, levels = c("Ambient", "31", "35.5")))
 
 # Make a full combination of all groups you'd expect at Timepoint 22
 all_combos <- expand.grid(
-  TREATMENT = c("T1", "T2", "T3"),
+  Treatment = c("Ambient", "31", "35.5"),
   SymbiontTreatment = unique(summary_stats_day22$SymbiontTreatment),
   Cross = unique(summary_stats_day22$Cross)
 )
 
 # Merge with your summary data
 summary_stats_day22 <- all_combos %>%
-  left_join(summary_stats_day22, by = c("TREATMENT", "SymbiontTreatment", "Cross")) %>%
+  left_join(summary_stats_day22, by = c("Treatment", "SymbiontTreatment", "Cross")) %>%
   mutate(
-    TIMEPOINT = 22,
+    Timepoint = 22,
     mean_pct = ifelse(is.na(mean_pct), 0, mean_pct),
     se = ifelse(is.na(se), 0, se),
-    TREATMENT = factor(TREATMENT, levels = c("T1", "T2", "T3"))
+    TREATMENT = factor(Treatment, levels = c("Ambient", "31", "35.5"))
   )
 
 summary_stats_day22$SymbiontTreatment <- factor(
   summary_stats_day22$SymbiontTreatment,
   levels = c("C", "D")  # or whatever levels you actually have
 )
-
-
 
 # Reorder the Treatment factor in the desired order
 #final_timepoint_df <- final_timepoint_df %>%
@@ -3799,7 +3745,7 @@ custom_colors <- c("CC" = "#1f77b4", "WW" = "#ff7f0e") # Modify as needed
 
 # Plot mean PercentageWithCells with error bars and custom colors
 pct_plot <- ggplot(summary_stats_day22, aes(
-  x = TREATMENT,
+  x = Treatment,
   y = mean_pct,
   fill = Cross,
   shape = SymbiontTreatment
@@ -3872,7 +3818,7 @@ final_timepoint_df_inset2 <- summary_df3_survived %>%
     mean_pct = mean(PercentageWithCells, na.rm = TRUE),
     se_pct = sd(PercentageWithCells, na.rm = TRUE) / sqrt(n())
   ) %>%
-  mutate(Treatment = factor(TREATMENT, levels = c("T1", "T2", "T3")))
+  mutate(Treatment = factor(TREATMENT, levels = c("Ambient", "31", "35.5")))
 
 mean_pct_plot2 <- ggplot(final_timepoint_df_inset2, aes(x = TREATMENT, y = mean_pct, shape = SymbiontTreatment)) +
   geom_point(size = 4, fill = NA, stroke = 1.5) +
@@ -3901,33 +3847,33 @@ ggsave("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Sp
 PercentageWithCells from Day 1 to Day 22
 ```{r}
 summary_df2_survived <- summary_df2_survived %>%
-  group_by(SymbiontTreatment, TREATMENT, Cross) %>%
+  group_by(SymbiontTreatment, Treatment, Cross) %>%
   mutate(PercentageWithCells_adj = PercentageWithCells + 0.01)
 
 # Extract PercentageWithCells at Day 1
 cells_day1 <- summary_df2_survived %>%
-  filter(TIMEPOINT == 1) %>%
-  dplyr::select(TREATMENT, ReefMom, SymbiontTreatment, Cross, PercentageWithCells_adj) %>%
+  filter(Timepoint == 1) %>%
+  dplyr::select(Treatment, ReefMom, SymbiontTreatment, Cross, PercentageWithCells_adj) %>%
   rename(CellsDay1 = PercentageWithCells_adj)
 
 # Extract PercentageWithCells at Day 22
 cells_day22 <- summary_df2_survived %>%
-  filter(TIMEPOINT == 22) %>%
-  dplyr::select(TREATMENT, ReefMom, SymbiontTreatment, Cross, PercentageWithCells_adj) %>%
+  filter(Timepoint == 22) %>%
+  dplyr::select(Treatment, ReefMom, SymbiontTreatment, Cross, PercentageWithCells_adj) %>%
   rename(CellsDay22 = PercentageWithCells_adj)
 
 # Join Day 1 and Day 22 data
 cells_change_df <- left_join(cells_day1, cells_day22,
-                             by = c("TREATMENT", "ReefMom", "SymbiontTreatment", "Cross"))
+                             by = c("Treatment", "ReefMom", "SymbiontTreatment", "Cross"))
 
 # Calculate change
 cells_change_df <- cells_change_df <- cells_change_df %>%
   mutate(AcquisitionChangeCells = (CellsDay22) - (CellsDay1))
 
 
-# Summarize percent change by TREATMENT, Cross, SymbiontTreatment
+# Summarize percent change by Treatment, Cross, SymbiontTreatment
 perc_change_summary <- cells_change_df %>%
-  group_by(TREATMENT, Cross, SymbiontTreatment) %>%
+  group_by(Treatment, Cross, SymbiontTreatment) %>%
   summarise(
     mean_perc_change = mean(AcquisitionChangeCells, na.rm = TRUE),
     se_perc_change = sd(AcquisitionChangeCells, na.rm = TRUE) / sqrt(n()),
@@ -3936,7 +3882,7 @@ perc_change_summary <- cells_change_df %>%
 
 # Reorder treatment levels
 perc_change_summary <- perc_change_summary %>%
-  mutate(Treatment = factor(TREATMENT, levels = c("T1", "T2", "T3")))
+  mutate(Treatment = factor(Treatment, levels = c("Ambient", "31", "35.5")))
 
 # Plot
 log_change_plot2 <- ggplot(perc_change_summary, aes(
@@ -4502,7 +4448,7 @@ ggsave("C:/Users/bellb/OneDrive - James Cook University/Australia/Ningaloo Spawn
 
 
 ```{r}
-# Summarize log change including ReefMom
+# Summarize perc change including ReefMom
 perc_change_summary_by_reef <- cells_change_df %>%
   filter(Treatment != "35.5") %>%
   group_by(Treatment, Cross, SymbiontTreatment, ReefMom) %>%
@@ -4959,11 +4905,16 @@ ipam_subset <- ipam %>%
 
 # Ensure factors are ordered
 ipam_subset$Treatment <- factor(ipam_subset$Treatment, 
-                                     levels = c("27.5", "31", "35.5"))
+                                     levels = c("Ambient", "31", "35.5"))
 ipam_subset$Cross <- factor(ipam_subset$Cross, 
-                                     levels = c("Bruboodjoo", "Tantabiddi"))
+                                     levels = c("CC", "WW"))
 ipam_subset$SymbiontTreatment <- factor(ipam_subset$SymbiontTreatment, 
                                      levels = c("C", "D"))
+
+#Remove 35.5 because larvae didn't survive
+ipam_subset <- ipam_subset %>% 
+  filter(Treatment != "35.5") %>%
+  droplevels()
 
 #check how many observations per group
 table(ipam_subset$SymbiontTreatment, ipam_subset$Cross, ipam_subset$Treatment)
@@ -5255,4 +5206,199 @@ summary_df <- results_df[, c("Effect",
 
 # Print
 print(summary_df)
+
+##########
+# Pairwise comparisons for survivors (Percent Change)
+##########
+
+# Create new data frame of combinations
+newdat <- expand.grid(
+  SymbiontTreatment = levels(ipam_subset$SymbiontTreatment),
+  Cross = levels(ipam_subset$Cross),
+  Treatment = levels(ipam_subset$Treatment)
+)
+
+# Ensure same factor levels as in model
+newdat$SymbiontTreatment <- factor(newdat$SymbiontTreatment, levels = levels(ipam_subset$SymbiontTreatment))
+newdat$Cross <- factor(newdat$Cross, levels = levels(ipam_subset$Cross))
+newdat$Treatment <- factor(newdat$Treatment, levels = levels(ipam_subset$Treatment))
+
+# For clarity in output
+newdat$group <- with(newdat, paste(SymbiontTreatment, Cross, Treatment, sep = "_"))
+
+# Design matrix must match the fixed effects structure in the full model
+X <- model.matrix(~ SymbiontTreatment * Cross * Treatment, data = newdat)
+
+# Match columns exactly
+X <- X[, colnames(model_perc$Sol), drop = FALSE]
+
+# Get posterior predictions
+pred_matrix <- X %*% t(model_perc$Sol)
+
+# All pairwise group combinations
+group_combos <- combn(1:nrow(newdat), 2, simplify = FALSE)
+
+# Compute posterior difference, 95% CI, and pMCMC
+pairwise_results <- lapply(group_combos, function(idx) {
+  i <- idx[1]
+  j <- idx[2]
+  diff <- pred_matrix[i, ] - pred_matrix[j, ]
+  ci <- quantile(diff, probs = c(0.025, 0.975))
+  pMCMC <- 2 * min(mean(diff > 0), mean(diff < 0))
+  
+  data.frame(
+    group1 = newdat$group[i],
+    group2 = newdat$group[j],
+    mean_diff = mean(diff),
+    lower = ci[1],
+    upper = ci[2],
+    pMCMC = pMCMC,
+    significant = ci[1] > 0 | ci[2] < 0
+  )
+})
+
+pairwise_df <- do.call(rbind, pairwise_results)
+
+ggplot(pairwise_df, aes(group1, group2, fill = mean_diff)) +
+  geom_tile() +
+  geom_text(aes(label = ifelse(significant, "*", "")), color = "white") +
+  scale_fill_viridis_c() +
+  theme_minimal() +
+  labs(title = "Pairwise Differences in log(Cell Density Change)",
+       x = "Group 1", y = "Group 2")
+
+# Add back-transformed columns and format them nicely
+pairwise_summary <- pairwise_df %>%
+  mutate(
+    mean_diff_bt = exp(mean_diff) - 1,
+    lower_bt = exp(lower) - 1,
+    upper_bt = exp(upper) - 1,
+    mean_diff_bt_fmt = formatC(mean_diff_bt, format = "e", digits = 2),
+    lower_bt_fmt = formatC(lower_bt, format = "e", digits = 2),
+    upper_bt_fmt = formatC(upper_bt, format = "e", digits = 2),
+    significant_label = ifelse(significant, "*", "")
+  ) %>%
+  select(
+    group1, group2,
+    mean_diff, lower, upper,
+    mean_diff_bt_fmt, lower_bt_fmt, upper_bt_fmt,
+    pMCMC, significant_label
+  ) %>%
+  rename(
+    `Group 1` = group1,
+    `Group 2` = group2,
+    `Mean Diff (log)` = mean_diff,
+    `Lower 95% CI (log)` = lower,
+    `Upper 95% CI (log)` = upper,
+    `Mean Diff (back-transformed)` = mean_diff_bt_fmt,
+    `Lower 95% CI (back-transformed)` = lower_bt_fmt,
+    `Upper 95% CI (back-transformed)` = upper_bt_fmt,
+    `pMCMC` = pMCMC,
+    `Significant` = significant_label
+  )
+
+write.csv(pairwise_summary, "C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/pairwise_summary_table_perc_with_cells.csv", row.names = FALSE)
+
+###############################################################
+# Now with just Treatment and Cross
+
+# Fit the model
+model_tc <- MCMCglmm(
+  PercChangeCells ~ Treatment * Cross,
+  random = ~ Replicate,
+  data = ipam_subset,
+  family = "gaussian",
+  prior = prior,
+  nitt = 50000,
+  burnin = 10000,
+  thin = 20
+)
+
+# New data grid for predictions
+newdat_tc <- expand.grid(
+  Treatment = levels(ipam_subset$Treatment),
+  Cross = levels(ipam_subset$Cross)
+)
+
+newdat_tc$Treatment <- factor(newdat_tc$Treatment, levels = levels(ipam_subset$Treatment))
+newdat_tc$Cross <- factor(newdat_tc$Cross, levels = levels(ipam_subset$Cross))
+
+# Model matrix for fixed effects (match model columns)
+X_tc <- model.matrix(~ Treatment * Cross, data = newdat_tc)
+
+# Subset posterior samples for fixed effects
+common_cols <- intersect(colnames(model_tc$Sol), colnames(X_tc))
+X_tc_aligned <- X_tc[, common_cols, drop = FALSE]
+Sol_tc <- model_tc$Sol[, common_cols, drop = FALSE]
+
+# Calculate predicted values per MCMC iteration
+pred_mat_tc <- X_tc_aligned %*% t(Sol_tc)  # rows = groups, cols = MCMC samples
+
+# Calculate pairwise differences for all combinations
+pairwise_diff_tc <- combn(nrow(newdat_tc), 2, function(i) {
+  diff_samples <- pred_mat_tc[i[1], ] - pred_mat_tc[i[2], ]
+  data.frame(
+    group1 = paste(as.character(newdat_tc$Treatment[i[1]]), as.character(newdat_tc$Cross[i[1]]), sep = "_"),
+    group2 = paste(as.character(newdat_tc$Treatment[i[2]]), as.character(newdat_tc$Cross[i[2]]), sep = "_"),
+    mean_diff = mean(diff_samples),
+    lower = quantile(diff_samples, 0.025),
+    upper = quantile(diff_samples, 0.975),
+    pMCMC = 2 * min(mean(diff_samples > 0), mean(diff_samples < 0))
+  )
+}, simplify = FALSE) %>% bind_rows()
+
+# Add significance flag
+pairwise_diff_tc <- pairwise_diff_tc %>%
+  mutate(significant = (lower > 0 | upper < 0))
+
+head(pairwise_diff_tc)
+
+###############################################################
+# Now with just Treatment and SymbiontTreatment
+model_ts <- MCMCglmm(
+  PercChangeCells ~ Treatment * SymbiontTreatment,
+  random = ~ Replicate,
+  data = ipam_subset,
+  family = "gaussian",
+  prior = prior,
+  nitt = 50000,
+  burnin = 10000,
+  thin = 20
+)
+
+newdat_ts <- expand.grid(
+  Treatment = levels(ipam_subset$Treatment),
+  SymbiontTreatment = levels(ipam_subset$SymbiontTreatment)
+)
+
+newdat_ts$Treatment <- factor(newdat_ts$Treatment, levels = levels(ipam_subset$Treatment))
+newdat_ts$SymbiontTreatment <- factor(newdat_ts$SymbiontTreatment, levels = levels(ipam_subset$SymbiontTreatment))
+
+X_ts <- model.matrix(~ Treatment * SymbiontTreatment, data = newdat_ts)
+common_cols <- intersect(colnames(model_ts$Sol), colnames(X_ts))
+X_ts_aligned <- X_ts[, common_cols, drop = FALSE]
+Sol_ts <- model_ts$Sol[, common_cols, drop = FALSE]
+
+pred_mat_ts <- X_ts_aligned %*% t(Sol_ts) 
+
+# Pairwise differences same approach as above
+pairwise_diff_ts <- combn(nrow(newdat_ts), 2, function(i) {
+  diff_samples <- pred_mat_ts[i[1], ] - pred_mat_ts[i[2], ]
+  data.frame(
+    group1 = paste(as.character(newdat_ts$Treatment[i[1]]), as.character(newdat_ts$SymbiontTreatment[i[1]]), sep = "_"),
+    group2 = paste(as.character(newdat_ts$Treatment[i[2]]), as.character(newdat_ts$SymbiontTreatment[i[2]]), sep = "_"),
+    mean_diff = mean(diff_samples),
+    lower = quantile(diff_samples, 0.025),
+    upper = quantile(diff_samples, 0.975),
+    pMCMC = 2 * min(mean(diff_samples > 0), mean(diff_samples < 0))
+  )
+}, simplify = FALSE) %>% bind_rows()
+
+
+pairwise_diff_ts <- pairwise_diff_ts %>%
+  mutate(significant = (lower > 0 | upper < 0))
+
+head(pairwise_diff_ts)
+
+
 ```
