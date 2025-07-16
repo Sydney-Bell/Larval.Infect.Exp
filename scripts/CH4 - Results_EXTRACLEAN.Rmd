@@ -3008,6 +3008,8 @@ subset_df$SymbiontTreatment <- factor(subset_df$SymbiontTreatment,
 subset_df <- subset_df %>% filter(Treatment != "35.5")
 subset_df$Treatment <- droplevels(subset_df$Treatment)
 
+subset_df$logPercChange <- log(subset_df$PercChange + 101)  # shift so all values are > 0
+
 #Set prior
 prior <- list(
   R = list(V = 1, nu = 0.002),  # Residual variance (Gaussian default)
@@ -3031,7 +3033,8 @@ pmcmc_values <- solution_summary[, "pMCMC"]
 #Check chain convergence and mixing
 library(coda)
 mcmc_obj <- as.mcmc(model3.reef$Sol)
-plot(mcmc_obj)              # Trace and density plots
+plot(mcmc_obj)  # Trace and density plots
+plot(model3.reef$VCV)
 autocorr.diag(mcmc_obj)     # Autocorrelation
 effectiveSize(mcmc_obj)     # Effective sample size
 
@@ -3102,7 +3105,7 @@ library(MCMCglmm)
 prior <- list(R = list(V = 1, nu = 0.002), G = list(G1 = list(V = 1, nu = 0.002)))
 
 # Full model formula
-full_formula <- PercChange ~ SymbiontTreatment * Cross_2 * Treatment
+full_formula <- RawChangeFvFm ~ SymbiontTreatment * Cross_2 * Treatment
 
 # Fit the full model
 model_full <- MCMCglmm(
@@ -3118,7 +3121,7 @@ model_full <- MCMCglmm(
 
 # Fit single fixed effect models
 model_treatment <- MCMCglmm(
-  fixed = PercChange ~ Treatment,
+  fixed = RawChangeFvFm ~ Treatment,
   random = ~Replicate,
   data = subset_df,
   family = "gaussian",
@@ -3129,7 +3132,7 @@ model_treatment <- MCMCglmm(
 )
 
 model_symbiont <- MCMCglmm(
-  fixed = PercChange ~ SymbiontTreatment,
+  fixed = RawChangeFvFm ~ SymbiontTreatment,
   random = ~Replicate,
   data = subset_df,
   family = "gaussian",
@@ -3140,7 +3143,7 @@ model_symbiont <- MCMCglmm(
 )
 
 model_cross2 <- MCMCglmm(
-  fixed = PercChange ~ Cross_2,
+  fixed = RawChangeFvFm ~ Cross_2,
   random = ~Replicate,
   data = subset_df,
   family = "gaussian",
@@ -3245,7 +3248,7 @@ calc_marginal_conditional_R2 <- function(model, data, fixed_formula) {
 
 # Example: model with SymbiontTreatment:Treatment interaction only
 model_interaction <- MCMCglmm(
-  fixed = PercChange ~ SymbiontTreatment:Treatment,
+  fixed = RawChangeFvFm ~ SymbiontTreatment:Treatment,
   random = ~Replicate,
   data = subset_df,
   family = "gaussian",
@@ -3498,8 +3501,8 @@ pred_mat_tc <- X_tc %*% t(Sol_tc)  # rows = groups, cols = MCMC samples
 pairwise_diff_tc <- combn(nrow(newdat_tc), 2, function(i) {
   diff_samples <- pred_mat_tc[i[1], ] - pred_mat_tc[i[2], ]
   data.frame(
-    group1 = paste(newdat_tc[i[1], ], collapse = "_"),
-    group2 = paste(newdat_tc[i[2], ], collapse = "_"),
+    group1 = paste(as.character(newdat_tc$Treatment[i[1]]), as.character(newdat_tc$Cross_2[i[1]]), sep = "_"),
+    group2 = paste(as.character(newdat_tc$Treatment[i[2]]), as.character(newdat_tc$Cross_2[i[2]]), sep = "_"),
     mean_diff = mean(diff_samples),
     lower = quantile(diff_samples, 0.025),
     upper = quantile(diff_samples, 0.975),
@@ -3542,8 +3545,8 @@ pred_mat_ts <- X_ts %*% t(Sol_ts)
 pairwise_diff_ts <- combn(nrow(newdat_ts), 2, function(i) {
   diff_samples <- pred_mat_ts[i[1], ] - pred_mat_ts[i[2], ]
   data.frame(
-    group1 = paste(newdat_ts[i[1], ], collapse = "_"),
-    group2 = paste(newdat_ts[i[2], ], collapse = "_"),
+    group1 = paste(as.character(newdat_ts$Treatment[i[1]]), as.character(newdat_ts$SymbiontTreatment[i[1]]), sep = "_"),
+    group2 = paste(as.character(newdat_ts$Treatment[i[2]]), as.character(newdat_ts$SymbiontTreatment[i[2]]), sep = "_"),
     mean_diff = mean(diff_samples),
     lower = quantile(diff_samples, 0.025),
     upper = quantile(diff_samples, 0.975),
@@ -3557,7 +3560,7 @@ pairwise_diff_ts <- pairwise_diff_ts %>%
 head(pairwise_diff_ts)
 
 ```
-Cell Density and Surival
+Cell Density and Survival
 ```{r}
 #############################
 ### Modeling variables separate for each health metric to get relative contributions ###
@@ -4030,6 +4033,7 @@ pairwise_diff_ts <- pairwise_diff_ts %>%
 
 head(pairwise_diff_ts)
 
+save.image(file = "my_workspace_15_07_2025.RData")
 ```
 Larval Size with Survivors only
 ```{r}
