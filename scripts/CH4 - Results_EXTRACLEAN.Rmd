@@ -17,6 +17,12 @@ df_subset <- readRDS("df_subset.rds")
 library('ggplot2'); packageVersion('ggplot2') #version 3.5.0
 library(dplyr)
 library(tidyr)
+#install.packages("MCMCglmm")
+library(MCMCglmm)
+#install.packages("lsmeans")
+library(lsmeans)
+install.packages("sjPlot")
+library(sjPlot)
 
 setwd("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment")
 
@@ -1216,34 +1222,6 @@ pair2 <- pairwise_survdiff(Surv(Timepoint, Status) ~ Treatment,
 
 pair2
 ```
-
-#Load in dataset and clean it for GLMMs
-
-```{r}
-#install.packages("MCMCglmm")
-library(MCMCglmm)
-#install.packages("lsmeans")
-library(lsmeans)
-library(tidyr)
-library(dplyr)
-
-#Validate the model
-summary(mod.1)
-#install.packages("DHARMa")
-library(DHARMa)
-
-#The assumptions of linearity and homogeneity of variance for a GLMM are based upon the residuals, so we must extract them and then perform validation
-simulationOutput <- simulateResiduals(mod.1, n = 1000)
-plot(simulationOutput)
-#The Q-Q plot visually shows if the points fall along a straight line, indicating that the data follows the theoretical distribution reasonably well.
-
-#Levene Test for homogenity of variance significant for all variables
-plotResiduals(simulationOutput, df_Surv$SymbiontTreatment)
-plotResiduals(simulationOutput, df_Surv$Family)
-plotResiduals(simulationOutput, df_Surv$Treatment)
-
-
-```
 #HEATMAP WITH SOURCE REEF (CC and WW instead of individial families)
 
 ##Fv/Fm with Source Reef
@@ -2090,6 +2068,7 @@ mcmc_obj <- as.mcmc(model_subset$Sol)
 plot(mcmc_obj)              # Trace and density plots
 autocorr.diag(mcmc_obj)     # Autocorrelation
 effectiveSize(mcmc_obj)     # Effective sample size
+heidel.diag(mcmc_obj)  # Heidelberger-Welch convergence diagnostic
 
 newdat2_subset <- expand.grid(
   SymbiontTreatment = levels(df_subset$SymbiontTreatment),
@@ -2409,6 +2388,75 @@ summary_df <- results_df[, c("Effect",
 
 # Print
 print(summary_df)
+
+# Pairwise comparisons
+# Extract posterior draws
+post <- model_subset$Sol
+
+# Cladocopium at 31°C (Cross_CC is baseline)
+clad_31 <- post[, "(Intercept)"] + post[, "Treatment31"]
+
+# Durusdinium at 31°C (Cross_CC is baseline)
+dur_31 <- post[, "(Intercept)"] +
+          post[, "SymbiontTreatmentD"] +
+          post[, "Treatment31"] +
+          post[, "SymbiontTreatmentD:Treatment31"]
+
+# Contrast
+contrast <- dur_31 - clad_31
+
+# Summary stats
+mean_diff <- mean(contrast)
+CI <- quantile(contrast, probs = c(0.025, 0.975))
+pMCMC <- 2 * min(mean(contrast > 0), mean(contrast < 0))
+
+# Output
+cat("Durusdinium vs Cladocopium at 31°C (Cross_CC)\n")
+cat("Mean difference:", round(mean_diff, 3), "\n")
+cat("95% CI:", round(CI[1], 3), "to", round(CI[2], 3), "\n")
+cat("pMCMC:", round(pMCMC, 4), "\n")
+
+###############################################################
+# Pairwise differences with just Treatment and SymbiontTreatment
+mod_ts <- MCMCglmm(logChangeCells ~ Treatment * SymbiontTreatment, 
+                          random = ~ Replicate , 
+                          data = df_subset, 
+                          family = "gaussian", 
+                          prior = prior, 
+                          nitt = 50000, 
+                          burnin = 10000, 
+                          thin = 20)
+
+newdat_ts <- expand.grid(
+  Treatment = levels(df_subset$Treatment),
+  SymbiontTreatment = levels(df_subset$SymbiontTreatment)
+)
+
+newdat_ts$Treatment <- factor(newdat_ts$Treatment, levels = levels(df_subset$Treatment))
+newdat_ts$SymbiontTreatment <- factor(newdat_ts$SymbiontTreatment, levels = levels(df_subset$SymbiontTreatment))
+
+X_ts <- model.matrix(~ Treatment * SymbiontTreatment, data = newdat_ts)
+Sol_ts <- mod_ts$Sol[, colnames(X_ts), drop = FALSE]
+pred_mat_ts <- X_ts %*% t(Sol_ts)
+
+# Pairwise differences same approach as above
+pairwise_diff_ts <- combn(nrow(newdat_ts), 2, function(i) {
+  diff_samples <- pred_mat_ts[i[1], ] - pred_mat_ts[i[2], ]
+  data.frame(
+    group1 = paste(as.character(newdat_ts$Treatment[i[1]]), as.character(newdat_ts$SymbiontTreatment[i[1]]), sep = "_"),
+    group2 = paste(as.character(newdat_ts$Treatment[i[2]]), as.character(newdat_ts$SymbiontTreatment[i[2]]), sep = "_"),
+    mean_diff = mean(diff_samples),
+    lower = quantile(diff_samples, 0.025),
+    upper = quantile(diff_samples, 0.975),
+    pMCMC = 2 * min(mean(diff_samples > 0), mean(diff_samples < 0))
+  )
+}, simplify = FALSE) %>% bind_rows()
+
+
+pairwise_diff_ts <- pairwise_diff_ts %>%
+  mutate(significant = (lower > 0 | upper < 0))
+
+head(pairwise_diff_ts)
 
 ```
 ##Survival GLMM with glmmTMB package and Source Reef
@@ -3610,6 +3658,7 @@ model_full <- MCMCglmm(full_formula,
   thin = 20
 )
 
+
 # Fit single fixed effect models
 mod_cells_treatment <- MCMCglmm(PercChangeCells ~ Treatment, 
                           random = ~ Replicate , 
@@ -4517,8 +4566,10 @@ library(rerddap)
 library(httr)
 library(readr)
 library(utils)
-
-library(rerddap)
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+library(tidyr)
 
 dataset_id <- "NOAA_DHW_monthly"
 
@@ -4547,11 +4598,6 @@ brubdjoo_sst <- griddap(sstInfo,
 
 tantabiddi_data <- tantabiddi_sst$data
 bruboodjoo_data <- brubdjoo_sst$data
-
-library(dplyr)
-library(lubridate)
-library(ggplot2)
-library(tidyr)
 
 # Add a site column
 tantabiddi_data <- tantabiddi_data %>% mutate(site = "Tantabiddi")
@@ -4599,6 +4645,9 @@ ggplot(mean_monthly, aes(x = month, y = mean_sst, color = site, group = site)) +
 tantabiddi <- tantabiddi_sst$data %>% mutate(site = "Tantabiddi")
 bruboodjoo <- brubdjoo_sst$data %>% mutate(site = "Bruboodjoo")
 
+
+# Define all_sst correctly for use in DHW and plotting
+all_sst <- bind_rows(tantabiddi, bruboodjoo)
 
 # Ensure time is Date format
 all_sst <- all_sst %>%
@@ -4665,6 +4714,39 @@ plot_annual_sst <- ggplot(annual_means, aes(x = site, y = mean_annual_sst, fill 
   ) +
   theme_minimal()
 
+# Calculate MMM per site and year (max monthly mean SST for each year)
+mmm_annual <- all_sst %>%
+  filter(year(time) >= 2004 & year(time) <= 2024) %>%
+  mutate(year = year(time), month = month(time)) %>%
+  group_by(site, year, month) %>%
+  summarise(monthly_mean = mean(sea_surface_temperature, na.rm = TRUE), .groups = "drop") %>%
+  group_by(site, year) %>%
+  summarise(mmm = max(monthly_mean, na.rm = TRUE), .groups = "drop")
+
+sst_with_dhw <- all_sst %>%
+  mutate(year = year(time)) %>%
+  filter(year >= 2004 & year <= 2024) %>%
+  left_join(mmm_annual, by = c("site", "year")) %>%
+  arrange(site, time) %>%
+  group_by(site) %>%
+  mutate(
+    hotspot = ifelse(sea_surface_temperature > (mmm + 1), sea_surface_temperature - mmm, 0),
+    dhw = rollapply(hotspot, width = 84, FUN = function(x) sum(x) / 7, align = "right", fill = NA)
+  ) %>%
+  ungroup()
+
+
+dhw_summary <- sst_with_dhw %>%
+  mutate(year = year(time)) %>%
+  filter(year >= 2004 & year <= 2024) %>%    # Restrict to desired years
+  group_by(site, year) %>%
+  filter(!all(is.na(dhw))) %>%                # Remove groups with all NA dhw
+  summarise(max_dhw = max(dhw, na.rm = TRUE), .groups = "drop")
+
+# Count years over 8 DHW
+dhw_gt8_summary <- dhw_summary %>%
+  group_by(site) %>%
+  summarise(years_over_8 = sum(max_dhw > 8, na.rm = TRUE))
 
 ```
 
@@ -4778,4 +4860,320 @@ ggsave("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Sp
 ```{r}
 save.image(file = "C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/my_environment_13_6_25.RData")
 ```
+Daily SST for DHW
+```{r}
+library(ncdf4)     # for reading NetCDF
+library(dplyr)
+library(lubridate)
+library(zoo)
+library(tidyr)
+
+nc <- nc_open("C:/Users/jc980786/Downloads/NingalooReef_1985-2022SST_new.nc")
+
+# Check variables
+print(nc)
+
+# Extract variables
+lon <- ncvar_get(nc, "lon")          # length 10
+lat <- ncvar_get(nc, "lat")          # length 35
+time <- ncvar_get(nc, "time")        # length 13872
+sst_raw <- ncvar_get(nc, "analysed_sst")  # 3D array lon x lat x time
+
+# Convert time to Date
+time_origin <- as.Date("1985-01-01")  # ignoring 12:00 noon difference
+dates <- time_origin + time
+
+nc_close(nc)
+
+# Apply scale factor
+sst <- sst_raw * 0.01
+
+# Create a data frame with all combinations and sst values
+grid <- expand.grid(lon = lon, lat = lat)
+
+# For memory efficiency, process in chunks or just example for one time point:
+# But here: reshape full 3D array into long format
+
+# Permute sst array to time x lon x lat for easier reshaping
+sst_perm <- aperm(sst, c(3,1,2))  # now dim: time x lon x lat
+
+# Convert to data frame:
+df_list <- lapply(1:length(dates), function(i) {
+  temp_df <- expand.grid(lon = lon, lat = lat)
+  temp_df$sst <- as.vector(sst_perm[i,,])
+  temp_df$date <- dates[i]
+  temp_df
+})
+
+sst_long <- bind_rows(df_list)
+
+# Filter coordinates for your sites
+tantabiddi_coords <- list(lon_min = 113.95, lon_max = 113.97, lat_min = -21.95, lat_max = -21.93)
+bruboodjoo_coords <- list(lon_min = 113.75, lon_max = 113.80, lat_min = -22.98, lat_max = -22.92)
+
+sst_filtered <- sst_long %>%
+  filter(
+    (lon >= tantabiddi_coords$lon_min & lon <= tantabiddi_coords$lon_max & lat >= tantabiddi_coords$lat_min & lat <= tantabiddi_coords$lat_max) |
+    (lon >= bruboodjoo_coords$lon_min & lon <= bruboodjoo_coords$lon_max & lat >= bruboodjoo_coords$lat_min & lat <= bruboodjoo_coords$lat_max)
+  ) %>%
+  mutate(site = case_when(
+    lon >= tantabiddi_coords$lon_min & lon <= tantabiddi_coords$lon_max &
+      lat >= tantabiddi_coords$lat_min & lat <= tantabiddi_coords$lat_max ~ "Tantabiddi",
+    lon >= bruboodjoo_coords$lon_min & lon <= bruboodjoo_coords$lon_max &
+      lat >= bruboodjoo_coords$lat_min & lat <= bruboodjoo_coords$lat_max ~ "Bruboodjoo",
+    TRUE ~ NA_character_
+  )) %>%
+  filter(!is.na(site))
+
+# Average daily SST per site
+daily_sst <- sst_filtered %>%
+  group_by(site, date) %>%
+  summarise(daily_sst = mean(sst, na.rm = TRUE), .groups = "drop")
+
+# Add year and month columns
+daily_sst <- daily_sst %>%
+  mutate(year = year(date), month = month(date))
+
+# Calculate monthly mean SST per site/year/month
+monthly_means <- daily_sst %>%
+  group_by(site, year, month) %>%
+  summarise(monthly_mean_sst = mean(daily_sst, na.rm = TRUE), .groups = "drop")
+
+# Calculate annual MMM = max monthly mean SST per site/year
+mmm_annual <- monthly_means %>%
+  group_by(site, year) %>%
+  summarise(mmm = max(monthly_mean_sst, na.rm = TRUE), .groups = "drop")
+
+sst_with_mmm <- daily_sst %>%
+  left_join(mmm_annual, by = c("site", "year")) %>%
+  arrange(site, date) %>%
+  mutate(
+    hotspot = ifelse(daily_sst > (mmm + 1), daily_sst - mmm, 0)
+  )
+
+library(zoo)
+
+# Rolling window width = 84 days
+window_days <- 84
+
+sst_with_dhw <- sst_with_mmm %>%
+  group_by(site) %>%
+  arrange(date) %>%
+  mutate(
+    dhw = rollapply(hotspot, width = window_days, FUN = function(x) sum(x) / 7, align = "right", fill = NA)
+  ) %>%
+  ungroup()
+
+dhw_summary <- sst_with_dhw %>%
+  group_by(site, year) %>%
+  summarise(max_dhw = max(dhw, na.rm = TRUE), .groups = "drop")
+
+dhw_years_gt8 <- dhw_summary %>%
+  group_by(site) %>%
+  summarise(years_dhw_over_8 = sum(max_dhw > 8, na.rm = TRUE))
+
+print(dhw_years_gt8)
+
+
+
+```
+
+```{r}
+# Load packages
+library(ncdf4)
+library(dplyr)
+library(lubridate)
+library(zoo)
+library(tidyr)
+library(ggplot2)
+
+# --- Step 1: Load and Prepare SST Data ---
+nc <- nc_open("C:/Users/jc980786/Downloads/NingalooReef_1985-2022SST_new.nc")
+
+lon <- ncvar_get(nc, "lon")
+lat <- ncvar_get(nc, "lat")
+time <- ncvar_get(nc, "time")
+sst_raw <- ncvar_get(nc, "analysed_sst")  # lon x lat x time
+nc_close(nc)
+
+# Convert time
+time_origin <- as.Date("1985-01-01")
+dates <- time_origin + time
+
+# Scale SST
+sst <- sst_raw
+
+# Reshape to long format
+sst_perm <- aperm(sst, c(3, 1, 2))  # time x lon x lat
+df_list <- lapply(1:length(dates), function(i) {
+  temp_df <- expand.grid(lon = lon, lat = lat)
+  temp_df$sst <- as.vector(sst_perm[i, , ])
+  temp_df$date <- dates[i]
+  temp_df
+})
+sst_long <- bind_rows(df_list)
+
+# --- Step 2: Filter for Study Sites ---
+# Helper function to find nearest lon/lat grid point
+find_nearest_point <- function(target_lon, target_lat, lon_vec, lat_vec) {
+  dist <- outer(lon_vec, lat_vec, FUN = function(x, y) sqrt((x - target_lon)^2 + (y - target_lat)^2))
+  which_min <- which(dist == min(dist), arr.ind = TRUE)
+  list(lon = lon_vec[which_min[1]], lat = lat_vec[which_min[2]])
+}
+
+# Target site centers (you can adjust if needed)
+tantabiddi_target <- list(lon = 113.96, lat = -21.94)
+bruboodjoo_target <- list(lon = 113.775, lat = -22.95)
+
+# Find closest grid points
+tantabiddi_nearest <- find_nearest_point(tantabiddi_target$lon, tantabiddi_target$lat, lon, lat)
+bruboodjoo_nearest <- find_nearest_point(bruboodjoo_target$lon, bruboodjoo_target$lat, lon, lat)
+
+# Combine into site dataframe
+site_coords <- data.frame(
+  site = c("Tantabiddi", "Bruboodjoo"),
+  lon = c(tantabiddi_nearest$lon, bruboodjoo_nearest$lon),
+  lat = c(tantabiddi_nearest$lat, bruboodjoo_nearest$lat)
+)
+
+# Filter SST data to those exact grid points
+sst_filtered <- sst_long %>%
+  inner_join(site_coords, by = c("lon", "lat"))
+
+# --- Step 3: Calculate Daily and Monthly Means ---
+daily_sst <- sst_filtered %>%
+  group_by(site, date) %>%
+  summarise(daily_sst = mean(sst, na.rm = TRUE), .groups = "drop") %>%
+  mutate(year = year(date), month = month(date))
+
+monthly_means <- daily_sst %>%
+  group_by(site, year, month) %>%
+  summarise(monthly_mean_sst = mean(daily_sst, na.rm = TRUE), .groups = "drop")
+
+# --- Step 4: Calculate Climatological MMM (1985–2015) ---
+baseline_mmm <- monthly_means %>%
+  filter(year >= 1985 & year <= 2015) %>%
+  group_by(site, month) %>%
+  summarise(clim_monthly_mean = mean(monthly_mean_sst, na.rm = TRUE), .groups = "drop") %>%
+  group_by(site) %>%
+  summarise(mmm = max(clim_monthly_mean, na.rm = TRUE), .groups = "drop")
+
+# --- Step 5: Calculate HotSpot and DHW ---
+#Calculates the Coral Bleaching HotSpot as defined:
+#SST - MMM, but only when SST > MMM + 1°C.
+sst_with_mmm <- daily_sst %>%
+  left_join(baseline_mmm, by = "site") %>%
+  arrange(site, date) %>%
+  mutate(
+    hotspot = ifelse(daily_sst > (mmm + 1), daily_sst - mmm, 0)
+  )
+
+# Apply rolling 84-day window (DHW = sum of HotSpots / 7), Sums only HotSpot values ≥ 1°C
+sst_with_dhw <- sst_with_mmm %>%
+  group_by(site) %>%
+  arrange(date) %>%
+  mutate(
+    dhw = rollapply(hotspot, width = 84, FUN = function(x) sum(x) / 7, align = "right", fill = NA),
+    bleaching_alert = case_when(
+      dhw > 8 ~ "Alert Level 2",
+      dhw > 4 ~ "Alert Level 1",
+      hotspot > 1 ~ "Watch",
+      TRUE ~ "None"
+    )
+  ) %>%
+  ungroup()
+
+# --- Step 6: Summarise & Print DHW Over Threshold ---
+dhw_summary <- sst_with_dhw %>%
+  group_by(site, year = year(date)) %>%
+  summarise(max_dhw = max(dhw, na.rm = TRUE), .groups = "drop")
+
+dhw_years_gt8 <- dhw_summary %>%
+  group_by(site) %>%
+  summarise(years_dhw_over_8 = sum(max_dhw > 8, na.rm = TRUE))
+
+print(dhw_years_gt8)
+
+# --- Step 7: Plotting DHW Time Series ---
+DWHplot <- ggplot(sst_with_dhw, aes(x = date, y = dhw, color = site)) +
+  geom_line() +
+  geom_hline(yintercept = 4, linetype = "dashed", color = "#fee08b") +
+  geom_hline(yintercept = 8, linetype = "dashed", color = "#d53e4f") +
+  facet_wrap(~site, scales = "fixed") +  # <-- FIXED y-axis
+  scale_y_continuous(name = "Degree Heating Weeks (°C-weeks)") +
+  scale_color_manual(
+    values = c(
+      "Tantabiddi" = "#ff7f0e",
+      "Bruboodjoo" = "#1f77b4"
+    )
+  ) +
+  labs(
+    title = "Degree Heating Weeks (DHW) Over Time at Two Ningaloo Reef Sites",
+    subtitle = "Dashed lines show Alert Level 1 (4°C-weeks) and Alert Level 2 (8°C-weeks)",
+    x = "Date",
+    color = "Site"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+
+#save
+ggsave("C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/dhwplot.png", plot = DWHplot, width = 15, height = 5, dpi = 300)
+
+#Calculate annual MMM per year (i.e., warmest monthly mean per year)
+annual_mmm <- monthly_means %>%
+  group_by(site, year) %>%
+  summarise(yearly_mmm = max(monthly_mean_sst, na.rm = TRUE), .groups = "drop") %>%
+  filter(year >= 1985 & year <= 2022)  # restrict to desired range
+
+#Summary stats
+mmm_summary <- annual_mmm %>%
+  group_by(site) %>%
+  summarise(
+    mean_mmm = mean(yearly_mmm, na.rm = TRUE),
+    sd_mmm = sd(yearly_mmm, na.rm = TRUE),
+    n = n()
+  )
+
+#Paird t-test
+mmm_wide <- annual_mmm %>%
+  pivot_wider(names_from = site, values_from = yearly_mmm)
+
+t_test_mmm <- t.test(mmm_wide$Tantabiddi, mmm_wide$Bruboodjoo, paired = TRUE)
+
+#Years with DHW > 8 + Fisher's Exact Test or Chi-square
+dhw_years_gt8 <- dhw_summary %>%
+  group_by(site) %>%
+  summarise(years_dhw_over_8 = sum(max_dhw > 8, na.rm = TRUE))
+
+# Create 2x2 contingency table
+dhw_contingency <- dhw_summary %>%
+  mutate(over_8 = max_dhw > 8) %>%
+  count(site, over_8) %>%
+  pivot_wider(names_from = over_8, values_from = n, values_fill = 0)
+
+fisher_test <- fisher.test(dhw_contingency[,-1])
+
+chisq_test <- chisq.test(as.matrix(dhw_contingency[,-1]))
+
+#Compute annual SD per site and then compare with a t-test
+sst_variability <- daily_sst %>%
+  filter(year >= 1985 & year <= 2022) %>%
+  group_by(site, year) %>%
+  summarise(temp_sd = sd(daily_sst, na.rm = TRUE), .groups = "drop")
+
+# Summary stats
+variability_summary <- sst_variability %>%
+  group_by(site) %>%
+  summarise(mean_sd = mean(temp_sd), sd_sd = sd(temp_sd))
+
+# Paired t-test
+sst_sd_wide <- sst_variability %>%
+  pivot_wider(names_from = site, values_from = temp_sd)
+
+t_test_variability <- t.test(sst_sd_wide$Tantabiddi, sst_sd_wide$Bruboodjoo, paired = TRUE)
+
+
+```
+
 
