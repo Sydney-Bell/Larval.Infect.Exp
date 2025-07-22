@@ -117,9 +117,6 @@ df_with_extremes <- df %>%
   mutate(Status = ifelse(`Alive..Dead..Sampled` == "Alive", 0, 1))
 
 #Long-format Cell Density (From No.Cells1–3)
-# Reload full dataset for long-format cell counts
-#totaldf <- read.csv("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/Metadata_NingSpawn2024_FINAL2.csv", header = TRUE, stringsAsFactors = FALSE)
-
 # Convert and reshape
 totaldf_long <- df_with_extremes %>%
   mutate(across(starts_with("No.Cells"), as.numeric)) %>%
