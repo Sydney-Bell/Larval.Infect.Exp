@@ -162,6 +162,17 @@ df_Surv <- df_Surv %>%
   ) %>%
   filter(!is.na(Percent_Survival))
 
+#Survival summary
+df_surv_summary <- df_Surv %>%
+  filter(Timepoint == 22) %>%   # keep only timepoint 22
+  group_by(Treatment) %>%  
+  summarise(
+    Mean_Survival = mean(Percent_Survival, na.rm = TRUE),
+    SD_Survival   = sd(Percent_Survival, na.rm = TRUE),
+    N             = n(),
+    SE_Survival   = SD_Survival / sqrt(N)
+  )
+
 # Temp coding based on Treatment
 df_Surv <- df_Surv %>%
   mutate(Temp = case_when(
@@ -170,6 +181,42 @@ df_Surv <- df_Surv %>%
     Treatment == "35.5" ~ "T3",
     TRUE ~ as.character(Temp)
   ))
+
+library(dplyr)
+
+#Calculate percent survival and summarize per treatment × timepoint
+#table of replicates
+table_s1_tubes <- df_with_extremes %>%
+  filter(!is.na(No.LarvaeInObserved)) %>%
+  group_by(Timepoint, Treatment, SymbiontTreatment, Cross_2) %>%
+  summarise(
+    Replicates_Started  = n(),                     # total tubes
+    Replicates_Survived = sum(No.LarvaeInObserved > 0), # tubes with ≥1 larvae alive
+    Percent_Tube_Survival = (Replicates_Survived / Replicates_Started) * 100,
+    Mean_Larval_Survival  = mean(No.LarvaeInObserved / No.LarvaeInStart * 100), # avg % larvae per tube
+    .groups = "drop"
+  ) %>%
+  arrange(Timepoint, Treatment, SymbiontTreatment, Cross_2)
+
+table_s1_tubes <- df_with_extremes %>%
+  filter(!is.na(No.LarvaeInObserved)) %>%
+  group_by(Timepoint, Treatment, SymbiontTreatment, Cross_2) %>%
+  summarise(
+    Replicates_Started      = n(),                              # total tubes
+    Replicates_Survived     = sum(No.LarvaeInObserved > 0),     # tubes with ≥1 larva alive
+    Percent_Tube_Survival   = (Replicates_Survived / Replicates_Started) * 100,
+    Mean_Larval_Survival    = mean(No.LarvaeInObserved / No.LarvaeInStart * 100), # avg % larvae per tube
+    Total_Larvae_Started    = sum(No.LarvaeInStart),           # sum of all larvae at start
+    Total_Larvae_Survived   = sum(No.LarvaeInObserved),        # sum of larvae alive
+    .groups = "drop"
+  ) %>%
+  arrange(Timepoint, Treatment, SymbiontTreatment, Cross_2)
+
+table_s1_tubes
+
+
+#write to CSV
+write.csv(table_s1_tubes, "C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/Table_S1_Larval_Survival_Tubes.csv", row.names = FALSE)
 
 # Cell Density
 totaldf_long <- totaldf_long %>%
@@ -1645,6 +1692,287 @@ summary_df <- results_df[, c("Effect",
 # Print
 print(summary_df)
 
+# ---- Variance Partitioning between SymbiontTreatment, Cross_2, and Treatment ----
+
+# sample size
+n <- nrow(df_with_extremes)
+print(n) #2772
+
+# Load packages
+library(vegan)
+library(dplyr)
+library(ggplot2)
+
+# ---- Step 1: Define predictors and response ----
+Y <- df_with_extremes$PercChange
+# SymbiontTreatment, Cross_2, Treatment are factors in your df
+
+# ---- Step 2: Variance partitioning ----
+varpart_result <- varpart(Y, ~SymbiontTreatment, ~Cross_2, ~Treatment, data = df_with_extremes)
+
+# Get adjusted R² fractions
+fractions <- varpart_result$part$indfract$Adj.R.square
+fractions[fractions < 0] <- 0  # truncate negatives
+
+# ---- Step 3: RDA + permutation tests for unique fractions ----
+# Unique Symbiont
+rda_X1 <- rda(df_with_extremes$PercChange ~ SymbiontTreatment + Condition(Cross_2 + Treatment), 
+              data = df_with_extremes)
+anova_X1 <- anova(rda_X1, permutations = 999)
+
+# Unique Cross
+rda_X2 <- rda(df_with_extremes$PercChange ~ Cross_2 + Condition(SymbiontTreatment + Treatment), data = df_with_extremes)
+anova_X2 <- anova(rda_X2, permutations = 999)
+
+# Unique Treatment
+rda_X3 <- rda(df_with_extremes$PercChange ~ Treatment + Condition(SymbiontTreatment + Cross_2), data = df_with_extremes)
+anova_X3 <- anova(rda_X3, permutations = 999)
+
+# ---- Step 4: Compile table for manuscript ----
+varpart_table <- data.frame(
+  Component = c("Unique Symbiont", "Unique Cross", "Unique Treatment", 
+                "Shared Symbiont/Cross", "Shared Symbiont/Treatment", 
+                "Shared Cross/Treatment", "Shared All", "Residual"),
+  Adj_R2 = c(fractions[1], fractions[2], fractions[3], 
+             fractions[4], fractions[5], fractions[6], fractions[7], fractions[8]),
+  F_stat = c(anova_X1$F[1], anova_X2$F[1], anova_X3$F[1], NA, NA, NA, NA, NA),
+  df_num = c(anova_X1$Df[1], anova_X2$Df[1], anova_X3$Df[1], NA, NA, NA, NA, NA),
+  df_den = c(anova_X1$Df[2], anova_X2$Df[2], anova_X3$Df[2], NA, NA, NA, NA, NA),
+  p_value = c(anova_X1$`Pr(>F)`[1], anova_X2$`Pr(>F)`[1], anova_X3$`Pr(>F)`[1], NA, NA, NA, NA, NA),
+  n = nrow(df_with_extremes)
+)
+
+# View the table
+varpart_table
+
+# ---- Step 5: Optional Venn diagram ----
+plot(varpart_result, bg = c("red", "blue", "green"), 
+     Xnames = c("Symbiont", "Cross", "Treatment"))
+
+# ---- Step 6: Optional ggplot barplot ----
+varpart_df <- varpart_table %>%
+  select(Component, Adj_R2)
+
+ggplot(varpart_df, aes(x = Component, y = Adj_R2, fill = Component)) +
+  geom_bar(stat = "identity", width = 0.7) +
+  geom_text(aes(label = sprintf("%.3f", Adj_R2)), vjust = -0.5, size = 3) +
+  theme_minimal(base_size = 14) +
+  ylab("Proportion of variance explained (adjusted R²)") +
+  xlab("") +
+  ggtitle("Variance Partitioning: Symbiont vs Cross vs Treatment") +
+  theme(legend.position = "none")
+
+# Save Venn diagram as PNG
+   # Just hover over the plot and right click to save image
+
+ggsave("C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/FvFm_VariancePartition_Barplot.png", plot = p, width = 10, height = 6, dpi = 300)
+
+write.csv(varpart_table, 
+          file = "C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/FvFm_varpart_table.csv",
+          row.names = FALSE)
+
+___________________________________
+library(MCMCglmm)
+
+# Already fitted full model
+# model_full <- MCMCglmm(PercChange ~ SymbiontTreatment * Cross_2 * Treatment, random = ~Replicate, ...)
+
+# Fit single fixed effect models
+model_symbiont <- MCMCglmm(PercChange ~ SymbiontTreatment, random = ~Replicate, data = df_with_extremes, family = "gaussian", prior = prior, nitt=50000, burnin=10000, thin=20)
+model_cross <- MCMCglmm(PercChange ~ Cross_2, random = ~Replicate, data = df_with_extremes, family = "gaussian", prior = prior, nitt=50000, burnin=10000, thin=20)
+model_treatment <- MCMCglmm(PercChange ~ Treatment, random = ~Replicate, data = df_with_extremes, family = "gaussian", prior = prior, nitt=50000, burnin=10000, thin=20)
+
+# ---- 2. Function to compute marginal R² per posterior sample ----
+calc_R2_samples <- function(model) {
+  linpred <- model$X %*% t(model$Sol)  # n x iterations
+  var_fixed <- apply(linpred, 2, var)
+  var_random <- rowSums(model$VCV[, "Replicate", drop = FALSE])
+  var_resid <- model$VCV[, "units"]
+  R2 <- var_fixed / (var_fixed + var_random + var_resid)
+  return(R2)  # vector of posterior R² values
+}
+
+# ---- 3. Compute posterior R² samples ----
+R2_full_samples <- calc_R2_samples(model_full)
+R2_symb_samples <- calc_R2_samples(model_symbiont)
+R2_cross_samples <- calc_R2_samples(model_cross)
+R2_treat_samples <- calc_R2_samples(model_treatment)
+
+# ---- 4. Compute unique, shared, and residual fractions per posterior sample ----
+unique_symb_samples <- R2_symb_samples
+unique_cross_samples <- R2_cross_samples
+unique_treat_samples <- R2_treat_samples
+shared_samples <- R2_full_samples - (unique_symb_samples + unique_cross_samples + unique_treat_samples)
+residual_samples <- 1 - R2_full_samples
+
+# Combine into a dataframe for plotting / summary
+varpart_samples <- data.frame(
+  Unique_Symbiont = unique_symb_samples,
+  Unique_Cross = unique_cross_samples,
+  Unique_Treatment = unique_treat_samples,
+  Shared = shared_samples,
+  Residual = residual_samples
+)
+
+# ---- 5. Summarize (mean + 95% credible intervals) ----
+varpart_summary <- varpart_samples %>%
+  summarise(across(everything(), list(
+    mean = ~mean(.x),
+    lower = ~quantile(.x, 0.025),
+    upper = ~quantile(.x, 0.975)
+  ), .names = "{.col}_{.fn}")) %>%
+  pivot_longer(everything(),
+               names_to = c("Component", ".value"),
+               names_sep = "_")
+
+varpart_summary
+
+ggplot(varpart_summary, aes(x = Component, y = mean, fill = Component)) +
+  geom_bar(stat = "identity", width = 0.7) +
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2) +
+  theme_minimal(base_size = 14) +
+  ylab("Variance explained (posterior mean ± 95% CI)") +
+  xlab("") +
+  ggtitle("Bayesian Variance Partitioning") +
+  theme(legend.position = "none")
+
+##################### interactions
+# Main effects
+main_effects <- c("SymbiontTreatment", "Cross_2", "Treatment")
+
+# Two-way interactions
+interactions_2way <- c("SymbiontTreatment:Cross_2",
+                        "SymbiontTreatment:Treatment",
+                        "Cross_2:Treatment")
+
+# Three-way interaction
+interaction_3way <- "SymbiontTreatment:Cross_2:Treatment"
+
+library(MCMCglmm)
+
+# Prior (same as your existing workflow)
+prior <- list(R = list(V = 1, nu = 0.002), G = list(G1 = list(V = 1, nu = 0.002)))
+
+# Function to fit model and compute marginal R²
+compute_marginal_R2 <- function(fixed_formula, data, random = ~Replicate) {
+  mod <- MCMCglmm(fixed = fixed_formula,
+                  random = random,
+                  data = data,
+                  family = "gaussian",
+                  prior = prior,
+                  nitt = 50000,
+                  burnin = 10000,
+                  thin = 20)
+  
+  X <- model.matrix(fixed_formula, data)
+  Sol <- mod$Sol[, colnames(X), drop = FALSE]
+  
+  linpred <- X %*% t(Sol)
+  var_fixed <- apply(linpred, 2, var)
+  
+  var_random <- rowSums(mod$VCV[, grep("Replicate", colnames(mod$VCV)), drop = FALSE])
+  var_resid <- mod$VCV[, "units"]
+  
+  R2 <- var_fixed / (var_fixed + var_random + var_resid)
+  
+  c(mean = mean(R2), lower = quantile(R2, 0.025), upper = quantile(R2, 0.975))
+}
+
+# Main effects
+r2_main <- lapply(main_effects, function(term) {
+  compute_marginal_R2(as.formula(paste("PercChange ~", term)), df_with_extremes)
+})
+names(r2_main) <- main_effects
+
+# Two-way interactions
+# List your 2-way interactions as strings
+interactions_2way <- c(
+  "SymbiontTreatment:Cross_2",
+  "SymbiontTreatment:Treatment",
+  "Cross_2:Treatment"
+)
+
+# Helper function to compute marginal R² for any formula
+compute_marginal_R2 <- function(model, data, fixed_formula) {
+  # Build model matrix for fixed effects
+  X <- model.matrix(fixed_formula, data = data)
+  
+  # Extract posterior samples of fixed effects
+  Sol <- model$Sol
+  
+  # Keep only matching columns
+  cols_to_keep <- colnames(X) %in% colnames(Sol)
+  X_sub <- X[, cols_to_keep, drop = FALSE]
+  Sol_sub <- Sol[, colnames(X_sub), drop = FALSE]
+  
+  # Linear predictor samples
+  linpred_samples <- X_sub %*% t(Sol_sub)
+  
+  # Variance of predicted values
+  var_fixed <- apply(linpred_samples, 2, var)
+  
+  # Variance components for random effects and residual
+  var_random <- rowSums(model$VCV[, grep("Replicate", colnames(model$VCV)), drop = FALSE])
+  var_resid <- model$VCV[, "units"]
+  
+  # Marginal R² per iteration
+  R2_marginal <- var_fixed / (var_fixed + var_random + var_resid)
+  
+  c(
+    mean = mean(R2_marginal),
+    lower = quantile(R2_marginal, 0.025),
+    upper = quantile(R2_marginal, 0.975)
+  )
+}
+
+# Apply function to all 2-way interactions
+r2_2way <- lapply(interactions_2way, function(term) {
+  compute_marginal_R2(term, df_with_extremes, model_full)
+})
+
+names(r2_2way) <- interactions_2way
+r2_2way
+
+
+# Three-way interaction
+r2_3way <- compute_marginal_R2(interaction_3way, df_with_extremes, model_full)
+r2_3way
+
+results_df <- rbind(
+  do.call(rbind, r2_main),
+  do.call(rbind, r2_2way),
+  ThreeWay = r2_3way
+)
+
+results_df <- as.data.frame(results_df)
+results_df$Component <- rownames(results_df)
+
+# Optional: compute % of full model
+full_model_R2 <- compute_marginal_R2(
+  model = model_full,
+  data = df_with_extremes,
+  fixed_formula = PercChange ~ SymbiontTreatment * Cross_2 * Treatment
+)
+
+results_df$Relative_Contribution <- results_df$mean / full_model_R2["mean"]
+results_df$Relative_Contribution_Percent <- round(100 * results_df$Relative_Contribution, 1)
+
+colnames(results_df)[colnames(results_df) == "lower.2.5%"] <- "lower"
+colnames(results_df)[colnames(results_df) == "upper.97.5%"] <- "upper"
+
+results_df <- results_df[, c("Component", "mean", "lower", "upper", "Relative_Contribution_Percent")]
+
+library(ggplot2)
+
+ggplot(results_df, aes(x = Component, y = mean, fill = Component)) +
+  geom_bar(stat = "identity", width = 0.7) +
+  geom_text(aes(label = paste0(round(mean, 3), " (", round(lower,3), "-", round(upper,3), ")")),
+            vjust = -0.5, size = 3) +
+  theme_minimal(base_size = 14) +
+  ylab("Proportion of variance explained (marginal R²)") +
+  xlab("") +
+  ggtitle("Variance Partitioning: Main Effects vs Interactions") +
+  theme(legend.position = "none")
 
 ```
 
@@ -2019,6 +2347,80 @@ summary_df <- results_df[, c("Effect",
 # Print
 print(summary_df)
 
+# ---- Variance Partitioning between SymbiontTreatment, Cross_2, and Treatment ----
+
+# Load packages
+library(vegan)
+library(dplyr)
+library(ggplot2)
+
+# ---- Step 1: Define predictors and response ----
+Y <- df_with_extremes$PercChangeSize
+# SymbiontTreatment, Cross_2, Treatment are factors in your df
+
+# ---- Step 2: Variance partitioning ----
+varpart_result <- varpart(Y, ~SymbiontTreatment, ~Cross_2, ~Treatment, data = df_with_extremes)
+
+# Get adjusted R² fractions
+fractions <- varpart_result$part$indfract$Adj.R.square
+fractions[fractions < 0] <- 0  # truncate negatives
+
+# ---- Step 3: RDA + permutation tests for unique fractions ----
+# Unique Symbiont
+rda_X1 <- rda(df_with_extremes$PercChangeSize ~ SymbiontTreatment + Condition(Cross_2 + Treatment), 
+              data = df_with_extremes)
+anova_X1 <- anova(rda_X1, permutations = 999)
+
+# Unique Cross
+rda_X2 <- rda(df_with_extremes$PercChangeSize ~ Cross_2 + Condition(SymbiontTreatment + Treatment), data = df_with_extremes)
+anova_X2 <- anova(rda_X2, permutations = 999)
+
+# Unique Treatment
+rda_X3 <- rda(df_with_extremes$PercChangeSize ~ Treatment + Condition(SymbiontTreatment + Cross_2), data = df_with_extremes)
+anova_X3 <- anova(rda_X3, permutations = 999)
+
+# ---- Step 4: Compile table for manuscript ----
+varpart_table <- data.frame(
+  Component = c("Unique Symbiont", "Unique Cross", "Unique Treatment", 
+                "Shared Symbiont/Cross", "Shared Symbiont/Treatment", 
+                "Shared Cross/Treatment", "Shared All", "Residual"),
+  Adj_R2 = c(fractions[1], fractions[2], fractions[3], 
+             fractions[4], fractions[5], fractions[6], fractions[7], fractions[8]),
+  F_stat = c(anova_X1$F[1], anova_X2$F[1], anova_X3$F[1], NA, NA, NA, NA, NA),
+  df_num = c(anova_X1$Df[1], anova_X2$Df[1], anova_X3$Df[1], NA, NA, NA, NA, NA),
+  df_den = c(anova_X1$Df[2], anova_X2$Df[2], anova_X3$Df[2], NA, NA, NA, NA, NA),
+  p_value = c(anova_X1$`Pr(>F)`[1], anova_X2$`Pr(>F)`[1], anova_X3$`Pr(>F)`[1], NA, NA, NA, NA, NA),
+  n = nrow(df_with_extremes)
+)
+
+# View the table
+varpart_table
+
+# ---- Step 5: Optional Venn diagram ----
+plot(varpart_result, bg = c("red", "blue", "green"), 
+     Xnames = c("Symbiont", "Cross", "Treatment"))
+
+# ---- Step 6: Optional ggplot barplot ----
+varpart_df <- varpart_table %>%
+  select(Component, Adj_R2)
+
+ggplot(varpart_df, aes(x = Component, y = Adj_R2, fill = Component)) +
+  geom_bar(stat = "identity", width = 0.7) +
+  geom_text(aes(label = sprintf("%.3f", Adj_R2)), vjust = -0.5, size = 3) +
+  theme_minimal(base_size = 14) +
+  ylab("Proportion of variance explained (adjusted R²)") +
+  xlab("") +
+  ggtitle("Variance Partitioning: Symbiont vs Cross vs Treatment") +
+  theme(legend.position = "none")
+
+# Save Venn diagram as PNG
+   # Just hover over the plot and right click to save image
+
+ggsave("C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/Size_VariancePartition_Barplot.png", plot = p, width = 10, height = 6, dpi = 300)
+
+write.csv(varpart_table, 
+          file = "C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/Size_varpart_table.csv",
+          row.names = FALSE)
 ```
 
 ##Cell Density with Source Reef
@@ -2455,6 +2857,80 @@ pairwise_diff_ts <- pairwise_diff_ts %>%
 
 head(pairwise_diff_ts)
 
+# ---- Variance Partitioning between SymbiontTreatment, Cross_2, and Treatment ----
+
+# Load packages
+library(vegan)
+library(dplyr)
+library(ggplot2)
+
+# ---- Step 1: Define predictors and response ----
+Y <- df_subset$PercChangeCells
+# SymbiontTreatment, Cross_2, Treatment are factors in your df
+
+# ---- Step 2: Variance partitioning ----
+varpart_result <- varpart(Y, ~SymbiontTreatment, ~Cross_2, ~Treatment, data = df_subset)
+
+# Get adjusted R² fractions
+fractions <- varpart_result$part$indfract$Adj.R.square
+fractions[fractions < 0] <- 0  # truncate negatives
+
+# ---- Step 3: RDA + permutation tests for unique fractions ----
+# Unique Symbiont
+rda_X1 <- rda(df_subset$PercChangeCells ~ SymbiontTreatment + Condition(Cross_2 + Treatment), 
+              data = df_subset)
+anova_X1 <- anova(rda_X1, permutations = 999)
+
+# Unique Cross
+rda_X2 <- rda(df_subset$PercChangeCells ~ Cross_2 + Condition(SymbiontTreatment + Treatment), data = df_subset)
+anova_X2 <- anova(rda_X2, permutations = 999)
+
+# Unique Treatment
+rda_X3 <- rda(df_subset$PercChangeCells ~ Treatment + Condition(SymbiontTreatment + Cross_2), data = df_subset)
+anova_X3 <- anova(rda_X3, permutations = 999)
+
+# ---- Step 4: Compile table for manuscript ----
+varpart_table <- data.frame(
+  Component = c("Unique Symbiont", "Unique Cross", "Unique Treatment", 
+                "Shared Symbiont/Cross", "Shared Symbiont/Treatment", 
+                "Shared Cross/Treatment", "Shared All", "Residual"),
+  Adj_R2 = c(fractions[1], fractions[2], fractions[3], 
+             fractions[4], fractions[5], fractions[6], fractions[7], fractions[8]),
+  F_stat = c(anova_X1$F[1], anova_X2$F[1], anova_X3$F[1], NA, NA, NA, NA, NA),
+  df_num = c(anova_X1$Df[1], anova_X2$Df[1], anova_X3$Df[1], NA, NA, NA, NA, NA),
+  df_den = c(anova_X1$Df[2], anova_X2$Df[2], anova_X3$Df[2], NA, NA, NA, NA, NA),
+  p_value = c(anova_X1$`Pr(>F)`[1], anova_X2$`Pr(>F)`[1], anova_X3$`Pr(>F)`[1], NA, NA, NA, NA, NA),
+  n = nrow(df_subset)
+)
+
+# View the table
+varpart_table
+
+# ---- Step 5: Optional Venn diagram ----
+plot(varpart_result, bg = c("red", "blue", "green"), 
+     Xnames = c("Symbiont", "Cross", "Treatment"))
+
+# ---- Step 6: Optional ggplot barplot ----
+varpart_df <- varpart_table %>%
+  select(Component, Adj_R2)
+
+ggplot(varpart_df, aes(x = Component, y = Adj_R2, fill = Component)) +
+  geom_bar(stat = "identity", width = 0.7) +
+  geom_text(aes(label = sprintf("%.3f", Adj_R2)), vjust = -0.5, size = 3) +
+  theme_minimal(base_size = 14) +
+  ylab("Proportion of variance explained (adjusted R²)") +
+  xlab("") +
+  ggtitle("Variance Partitioning: Symbiont vs Cross vs Treatment") +
+  theme(legend.position = "none")
+
+# Save Venn diagram as PNG
+   # Just hover over the plot and right click to save image
+
+ggsave("C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/Density_VariancePartition_Barplot.png", plot = p, width = 10, height = 6, dpi = 300)
+
+write.csv(varpart_table, 
+          file = "C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/Density_varpart_table.csv",
+          row.names = FALSE)
 ```
 ##Survival GLMM with glmmTMB package and Source Reef
 ```{r}
@@ -3604,6 +4080,81 @@ pairwise_diff_ts <- pairwise_diff_ts %>%
 
 head(pairwise_diff_ts)
 
+# ---- Variance Partitioning between SymbiontTreatment, Cross_2, and Treatment ----
+
+# Load packages
+library(vegan)
+library(dplyr)
+library(ggplot2)
+
+# ---- Step 1: Define predictors and response ----
+Y <- subset_df$RawChangeFvFm
+# SymbiontTreatment, Cross_2, Treatment are factors in your df
+
+# ---- Step 2: Variance partitioning ----
+varpart_result <- varpart(Y, ~SymbiontTreatment, ~Cross_2, ~Treatment, data = subset_df)
+
+# Get adjusted R² fractions
+fractions <- varpart_result$part$indfract$Adj.R.square
+fractions[fractions < 0] <- 0  # truncate negatives
+
+# ---- Step 3: RDA + permutation tests for unique fractions ----
+# Unique Symbiont
+rda_X1 <- rda(subset_df$RawChangeFvFm ~ SymbiontTreatment + Condition(Cross_2 + Treatment), 
+              data = subset_df)
+anova_X1 <- anova(rda_X1, permutations = 999)
+
+# Unique Cross
+rda_X2 <- rda(subset_df$RawChangeFvFm ~ Cross_2 + Condition(SymbiontTreatment + Treatment), data = subset_df)
+anova_X2 <- anova(rda_X2, permutations = 999)
+
+# Unique Treatment
+rda_X3 <- rda(subset_df$RawChangeFvFm ~ Treatment + Condition(SymbiontTreatment + Cross_2), data = subset_df)
+anova_X3 <- anova(rda_X3, permutations = 999)
+
+# ---- Step 4: Compile table for manuscript ----
+varpart_table <- data.frame(
+  Component = c("Unique Symbiont", "Unique Cross", "Unique Treatment", 
+                "Shared Symbiont/Cross", "Shared Symbiont/Treatment", 
+                "Shared Cross/Treatment", "Shared All", "Residual"),
+  Adj_R2 = c(fractions[1], fractions[2], fractions[3], 
+             fractions[4], fractions[5], fractions[6], fractions[7], fractions[8]),
+  F_stat = c(anova_X1$F[1], anova_X2$F[1], anova_X3$F[1], NA, NA, NA, NA, NA),
+  df_num = c(anova_X1$Df[1], anova_X2$Df[1], anova_X3$Df[1], NA, NA, NA, NA, NA),
+  df_den = c(anova_X1$Df[2], anova_X2$Df[2], anova_X3$Df[2], NA, NA, NA, NA, NA),
+  p_value = c(anova_X1$`Pr(>F)`[1], anova_X2$`Pr(>F)`[1], anova_X3$`Pr(>F)`[1], NA, NA, NA, NA, NA),
+  n = nrow(subset_df)
+)
+
+# View the table
+varpart_table
+
+# ---- Step 5: Optional Venn diagram ----
+plot(varpart_result, bg = c("red", "blue", "green"), 
+     Xnames = c("Symbiont", "Cross", "Treatment"))
+
+# ---- Step 6: Optional ggplot barplot ----
+varpart_df <- varpart_table %>%
+  select(Component, Adj_R2)
+
+ggplot(varpart_df, aes(x = Component, y = Adj_R2, fill = Component)) +
+  geom_bar(stat = "identity", width = 0.7) +
+  geom_text(aes(label = sprintf("%.3f", Adj_R2)), vjust = -0.5, size = 3) +
+  theme_minimal(base_size = 14) +
+  ylab("Proportion of variance explained (adjusted R²)") +
+  xlab("") +
+  ggtitle("Variance Partitioning: Symbiont vs Cross vs Treatment") +
+  theme(legend.position = "none")
+
+# Save Venn diagram as PNG
+   # Just hover over the plot and right click to save image
+
+ggsave("C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/FvFm_SURVIVORS_VariancePartition_Barplot.png", plot = p, width = 10, height = 6, dpi = 300)
+
+write.csv(varpart_table, 
+          file = "C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/FvFm_SURVIVORS_varpart_table.csv",
+          row.names = FALSE)
+
 ```
 Cell Density and Survival
 ```{r}
@@ -4744,6 +5295,11 @@ dhw_summary <- sst_with_dhw %>%
 dhw_gt8_summary <- dhw_summary %>%
   group_by(site) %>%
   summarise(years_over_8 = sum(max_dhw > 8, na.rm = TRUE))
+
+# Cumulative DHW per site over all years
+cumulative_dhw <- dhw_summary %>%
+  group_by(site) %>%
+  summarise(total_dhw = sum(max_dhw, na.rm = TRUE))
 
 ```
 
