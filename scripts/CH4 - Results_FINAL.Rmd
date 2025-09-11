@@ -1301,7 +1301,7 @@ prior <- list(
 
 
 # Fit the model
-model3.reef <- MCMCglmm(PercChange ~ SymbiontTreatment * Cross_2 * Treatment, 
+model3.reef <- MCMCglmm(RawChangeFvFm ~ SymbiontTreatment * Cross_2 * Treatment, 
                         random = ~ Replicate, 
                         data = df_with_extremes, 
                         family = "gaussian",  
@@ -1318,22 +1318,34 @@ plot(mcmc_obj)              # Trace and density plots
 autocorr.diag(mcmc_obj)     # Autocorrelation
 effectiveSize(mcmc_obj)     # Effective sample size
 
-# Create prediction grid
+# 1. Create prediction grid
 newdat.reef <- expand.grid(
   SymbiontTreatment = levels(df_with_extremes$SymbiontTreatment),
   Cross_2 = levels(df_with_extremes$Cross_2),
   Treatment = levels(df_with_extremes$Treatment)
 )
 
-# Ensure factor levels match
+#match levels exactly to model
+newdat.reef$Treatment <- factor(newdat.reef$Treatment,
+                                levels = levels(df_with_extremes$Treatment))  # same as model
+newdat.reef$Cross_2 <- factor(newdat.reef$Cross_2,
+                              levels = levels(df_with_extremes$Cross_2))
+newdat.reef$SymbiontTreatment <- factor(newdat.reef$SymbiontTreatment,
+                                        levels = levels(df_with_extremes$SymbiontTreatment))
+
+# Ensure factor levels match original data
 newdat.reef <- newdat.reef %>%
   mutate(across(everything(), ~ factor(.x, levels = levels(df_with_extremes[[cur_column()]]))))
 
-# Generate design matrix
+#double check factors
+newdat.reef[1, ]  # Should show Ambient, BxB, C
+
+# 2. Generate design matrix
 # Model matrix for prediction rows
 X_full <- model.matrix(~ SymbiontTreatment * Cross_2 * Treatment, data = newdat.reef)
-X <- X_full[, names(pmcmc_values), drop = FALSE]  # Make sure columns match
+X <- X_full[, colnames(model3.reef$Sol), drop = FALSE]
 
+# 3. Posterior predictions
 # For each prediction, calculate a "pMCMC-equivalent" value
 # This is done by testing whether the *linear combination of coefficients* differs from 0
 # using the posterior distribution (model3.reef$Sol)
@@ -1344,7 +1356,7 @@ newdat.reef$pred_mean <- rowMeans(posterior_preds)
 newdat.reef$lower <- apply(posterior_preds, 1, quantile, probs = 0.025)
 newdat.reef$upper <- apply(posterior_preds, 1, quantile, probs = 0.975)
 
-# Calculate pMCMC: proportion of posterior samples less than 0 or greater than 0
+# 4. Calculate pMCMC: proportion of posterior samples less than 0 or greater than 0 (optional)
 newdat.reef$pMCMC <- apply(posterior_preds, 1, function(x) {
   2 * min(mean(x > 0), mean(x < 0))
 })
@@ -1362,47 +1374,57 @@ newdat.reef$label_combined <- paste0(
 # Make sure pred_mean is numeric for fill
 newdat.reef$pred_mean <- as.numeric(as.character(newdat.reef$pred_mean))
 
-#Global mean
-# Vector of posterior means across all groups for each MCMC iteration
-global_mean_post_subset <- colMeans(posterior_preds)
-# Difference: each group's posterior - global mean at each MCMC iteration
-diff_matrix_global_subset <- sweep(posterior_preds, 2, global_mean_post_subset, FUN = "-")
-# pMCMC: two-tailed probability that the difference ≠ 0
-pMCMC_vals <- apply(diff_matrix_global_subset, 1, function(x) {
-  mean(x < 0) * 2 * (mean(x < 0) < 0.5) + mean(x > 0) * 2 * (mean(x > 0) < 0.5)
+# 5. Compare to control (Ambient X BxB X C)
+control_row <- which(
+  newdat.reef$Treatment == "Ambient" &
+  newdat.reef$Cross_2 == "BxB" &
+  newdat.reef$SymbiontTreatment == "C"
+)
+
+control_post <- posterior_preds[control_row, ]
+
+diff_matrix_control <- sweep(posterior_preds, 2, control_post, FUN = "-")
+
+pMCMC_control <- apply(diff_matrix_control, 1, function(x) {
+  2 * min(mean(x > 0), mean(x < 0))
 })
-diff_summary_global_subset <- as.data.frame(t(apply(diff_matrix_global_subset, 1, function(x) {
+
+diff_summary_control <- t(apply(diff_matrix_control, 1, function(x) {
   q <- quantile(x, probs = c(0.025, 0.975))
   c(mean_diff = mean(x), lower = q[1], upper = q[2])
-})))
+}))
 
-colnames(diff_summary_global_subset) <- c("mean_global", "lower_global", "upper_global")
+diff_summary_control <- as.data.frame(diff_summary_control)
+colnames(diff_summary_control) <- c("mean_control", "lower_control", "upper_control")
+diff_summary_control$pMCMC_control <- pMCMC_control
 
-diff_summary_global_subset$pMCMC <- pMCMC_vals
-diff_summary_global_subset$signif_label_global <- case_when(
-  pMCMC_vals < 0.005 ~ "**",
-  pMCMC_vals < 0.05  ~ "*",
-  TRUE               ~ ""
+diff_summary_control$signif_label_control <- case_when(
+  pMCMC_control < 0.005 ~ "**",
+  pMCMC_control < 0.05  ~ "*",
+  TRUE                  ~ ""
 )
 
-diff_summary_global_subset$label_combined_global <- paste0(
-  round(diff_summary_global_subset$mean_global, 2),
-  diff_summary_global_subset$signif_label_global
+diff_summary_control$label_combined_control <- paste0(
+  round(diff_summary_control$mean_control, 2),
+  diff_summary_control$signif_label_control
 )
 
-diff_summary_global_subset <- as.data.frame(diff_summary_global_subset)
-diff_summary_global_subset$significant_vs_global <- with(diff_summary_global_subset, lower_global > 0 | upper_global < 0)
+diff_summary_control$significant_vs_control <- with(
+  diff_summary_control,
+  lower_control > 0 | upper_control < 0
+)
 
-newdat.reef <- cbind(newdat.reef, diff_summary_global_subset)
+# 6. Combine with newdat.reef
+newdat.reef <- cbind(newdat.reef, diff_summary_control)
 
 # Plot predicted means
-ggplot(newdat.reef, aes(x = Treatment, y = Cross_2, fill = pred_mean)) +
+ggplot(newdat.reef, aes(x = Treatment, y = Cross_2, fill = mean_control)) +
   geom_tile(color = "white") +
-  geom_text(aes(label = label_combined), color = "black", size = 4) +
+  geom_text(aes(label = label_combined_control), color = "black", size = 4) +
   facet_wrap(~ SymbiontTreatment) +
-  scale_fill_viridis_c(name = "Predicted Change") +
+  scale_fill_viridis_c(name = "Difference from Control") +
   theme_minimal() +
-  labs(title = "Predicted Percent Change in Fv/Fm with pMCMC Significance",
+  labs(title = "Predicted Fv/Fm Change Relative to Control (Ambient × CC × C)",
        x = "Temperature", y = "Host Genotype")
 
 
@@ -1692,288 +1714,6 @@ summary_df <- results_df[, c("Effect",
 # Print
 print(summary_df)
 
-# ---- Variance Partitioning between SymbiontTreatment, Cross_2, and Treatment ----
-
-# sample size
-n <- nrow(df_with_extremes)
-print(n) #2772
-
-# Load packages
-library(vegan)
-library(dplyr)
-library(ggplot2)
-
-# ---- Step 1: Define predictors and response ----
-Y <- df_with_extremes$PercChange
-# SymbiontTreatment, Cross_2, Treatment are factors in your df
-
-# ---- Step 2: Variance partitioning ----
-varpart_result <- varpart(Y, ~SymbiontTreatment, ~Cross_2, ~Treatment, data = df_with_extremes)
-
-# Get adjusted R² fractions
-fractions <- varpart_result$part$indfract$Adj.R.square
-fractions[fractions < 0] <- 0  # truncate negatives
-
-# ---- Step 3: RDA + permutation tests for unique fractions ----
-# Unique Symbiont
-rda_X1 <- rda(df_with_extremes$PercChange ~ SymbiontTreatment + Condition(Cross_2 + Treatment), 
-              data = df_with_extremes)
-anova_X1 <- anova(rda_X1, permutations = 999)
-
-# Unique Cross
-rda_X2 <- rda(df_with_extremes$PercChange ~ Cross_2 + Condition(SymbiontTreatment + Treatment), data = df_with_extremes)
-anova_X2 <- anova(rda_X2, permutations = 999)
-
-# Unique Treatment
-rda_X3 <- rda(df_with_extremes$PercChange ~ Treatment + Condition(SymbiontTreatment + Cross_2), data = df_with_extremes)
-anova_X3 <- anova(rda_X3, permutations = 999)
-
-# ---- Step 4: Compile table for manuscript ----
-varpart_table <- data.frame(
-  Component = c("Unique Symbiont", "Unique Cross", "Unique Treatment", 
-                "Shared Symbiont/Cross", "Shared Symbiont/Treatment", 
-                "Shared Cross/Treatment", "Shared All", "Residual"),
-  Adj_R2 = c(fractions[1], fractions[2], fractions[3], 
-             fractions[4], fractions[5], fractions[6], fractions[7], fractions[8]),
-  F_stat = c(anova_X1$F[1], anova_X2$F[1], anova_X3$F[1], NA, NA, NA, NA, NA),
-  df_num = c(anova_X1$Df[1], anova_X2$Df[1], anova_X3$Df[1], NA, NA, NA, NA, NA),
-  df_den = c(anova_X1$Df[2], anova_X2$Df[2], anova_X3$Df[2], NA, NA, NA, NA, NA),
-  p_value = c(anova_X1$`Pr(>F)`[1], anova_X2$`Pr(>F)`[1], anova_X3$`Pr(>F)`[1], NA, NA, NA, NA, NA),
-  n = nrow(df_with_extremes)
-)
-
-# View the table
-varpart_table
-
-# ---- Step 5: Optional Venn diagram ----
-plot(varpart_result, bg = c("red", "blue", "green"), 
-     Xnames = c("Symbiont", "Cross", "Treatment"))
-
-# ---- Step 6: Optional ggplot barplot ----
-varpart_df <- varpart_table %>%
-  select(Component, Adj_R2)
-
-ggplot(varpart_df, aes(x = Component, y = Adj_R2, fill = Component)) +
-  geom_bar(stat = "identity", width = 0.7) +
-  geom_text(aes(label = sprintf("%.3f", Adj_R2)), vjust = -0.5, size = 3) +
-  theme_minimal(base_size = 14) +
-  ylab("Proportion of variance explained (adjusted R²)") +
-  xlab("") +
-  ggtitle("Variance Partitioning: Symbiont vs Cross vs Treatment") +
-  theme(legend.position = "none")
-
-# Save Venn diagram as PNG
-   # Just hover over the plot and right click to save image
-
-ggsave("C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/FvFm_VariancePartition_Barplot.png", plot = p, width = 10, height = 6, dpi = 300)
-
-write.csv(varpart_table, 
-          file = "C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/FvFm_varpart_table.csv",
-          row.names = FALSE)
-
-___________________________________
-library(MCMCglmm)
-
-# Already fitted full model
-# model_full <- MCMCglmm(PercChange ~ SymbiontTreatment * Cross_2 * Treatment, random = ~Replicate, ...)
-
-# Fit single fixed effect models
-model_symbiont <- MCMCglmm(PercChange ~ SymbiontTreatment, random = ~Replicate, data = df_with_extremes, family = "gaussian", prior = prior, nitt=50000, burnin=10000, thin=20)
-model_cross <- MCMCglmm(PercChange ~ Cross_2, random = ~Replicate, data = df_with_extremes, family = "gaussian", prior = prior, nitt=50000, burnin=10000, thin=20)
-model_treatment <- MCMCglmm(PercChange ~ Treatment, random = ~Replicate, data = df_with_extremes, family = "gaussian", prior = prior, nitt=50000, burnin=10000, thin=20)
-
-# ---- 2. Function to compute marginal R² per posterior sample ----
-calc_R2_samples <- function(model) {
-  linpred <- model$X %*% t(model$Sol)  # n x iterations
-  var_fixed <- apply(linpred, 2, var)
-  var_random <- rowSums(model$VCV[, "Replicate", drop = FALSE])
-  var_resid <- model$VCV[, "units"]
-  R2 <- var_fixed / (var_fixed + var_random + var_resid)
-  return(R2)  # vector of posterior R² values
-}
-
-# ---- 3. Compute posterior R² samples ----
-R2_full_samples <- calc_R2_samples(model_full)
-R2_symb_samples <- calc_R2_samples(model_symbiont)
-R2_cross_samples <- calc_R2_samples(model_cross)
-R2_treat_samples <- calc_R2_samples(model_treatment)
-
-# ---- 4. Compute unique, shared, and residual fractions per posterior sample ----
-unique_symb_samples <- R2_symb_samples
-unique_cross_samples <- R2_cross_samples
-unique_treat_samples <- R2_treat_samples
-shared_samples <- R2_full_samples - (unique_symb_samples + unique_cross_samples + unique_treat_samples)
-residual_samples <- 1 - R2_full_samples
-
-# Combine into a dataframe for plotting / summary
-varpart_samples <- data.frame(
-  Unique_Symbiont = unique_symb_samples,
-  Unique_Cross = unique_cross_samples,
-  Unique_Treatment = unique_treat_samples,
-  Shared = shared_samples,
-  Residual = residual_samples
-)
-
-# ---- 5. Summarize (mean + 95% credible intervals) ----
-varpart_summary <- varpart_samples %>%
-  summarise(across(everything(), list(
-    mean = ~mean(.x),
-    lower = ~quantile(.x, 0.025),
-    upper = ~quantile(.x, 0.975)
-  ), .names = "{.col}_{.fn}")) %>%
-  pivot_longer(everything(),
-               names_to = c("Component", ".value"),
-               names_sep = "_")
-
-varpart_summary
-
-ggplot(varpart_summary, aes(x = Component, y = mean, fill = Component)) +
-  geom_bar(stat = "identity", width = 0.7) +
-  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2) +
-  theme_minimal(base_size = 14) +
-  ylab("Variance explained (posterior mean ± 95% CI)") +
-  xlab("") +
-  ggtitle("Bayesian Variance Partitioning") +
-  theme(legend.position = "none")
-
-##################### interactions
-# Main effects
-main_effects <- c("SymbiontTreatment", "Cross_2", "Treatment")
-
-# Two-way interactions
-interactions_2way <- c("SymbiontTreatment:Cross_2",
-                        "SymbiontTreatment:Treatment",
-                        "Cross_2:Treatment")
-
-# Three-way interaction
-interaction_3way <- "SymbiontTreatment:Cross_2:Treatment"
-
-library(MCMCglmm)
-
-# Prior (same as your existing workflow)
-prior <- list(R = list(V = 1, nu = 0.002), G = list(G1 = list(V = 1, nu = 0.002)))
-
-# Function to fit model and compute marginal R²
-compute_marginal_R2 <- function(fixed_formula, data, random = ~Replicate) {
-  mod <- MCMCglmm(fixed = fixed_formula,
-                  random = random,
-                  data = data,
-                  family = "gaussian",
-                  prior = prior,
-                  nitt = 50000,
-                  burnin = 10000,
-                  thin = 20)
-  
-  X <- model.matrix(fixed_formula, data)
-  Sol <- mod$Sol[, colnames(X), drop = FALSE]
-  
-  linpred <- X %*% t(Sol)
-  var_fixed <- apply(linpred, 2, var)
-  
-  var_random <- rowSums(mod$VCV[, grep("Replicate", colnames(mod$VCV)), drop = FALSE])
-  var_resid <- mod$VCV[, "units"]
-  
-  R2 <- var_fixed / (var_fixed + var_random + var_resid)
-  
-  c(mean = mean(R2), lower = quantile(R2, 0.025), upper = quantile(R2, 0.975))
-}
-
-# Main effects
-r2_main <- lapply(main_effects, function(term) {
-  compute_marginal_R2(as.formula(paste("PercChange ~", term)), df_with_extremes)
-})
-names(r2_main) <- main_effects
-
-# Two-way interactions
-# List your 2-way interactions as strings
-interactions_2way <- c(
-  "SymbiontTreatment:Cross_2",
-  "SymbiontTreatment:Treatment",
-  "Cross_2:Treatment"
-)
-
-# Helper function to compute marginal R² for any formula
-compute_marginal_R2 <- function(model, data, fixed_formula) {
-  # Build model matrix for fixed effects
-  X <- model.matrix(fixed_formula, data = data)
-  
-  # Extract posterior samples of fixed effects
-  Sol <- model$Sol
-  
-  # Keep only matching columns
-  cols_to_keep <- colnames(X) %in% colnames(Sol)
-  X_sub <- X[, cols_to_keep, drop = FALSE]
-  Sol_sub <- Sol[, colnames(X_sub), drop = FALSE]
-  
-  # Linear predictor samples
-  linpred_samples <- X_sub %*% t(Sol_sub)
-  
-  # Variance of predicted values
-  var_fixed <- apply(linpred_samples, 2, var)
-  
-  # Variance components for random effects and residual
-  var_random <- rowSums(model$VCV[, grep("Replicate", colnames(model$VCV)), drop = FALSE])
-  var_resid <- model$VCV[, "units"]
-  
-  # Marginal R² per iteration
-  R2_marginal <- var_fixed / (var_fixed + var_random + var_resid)
-  
-  c(
-    mean = mean(R2_marginal),
-    lower = quantile(R2_marginal, 0.025),
-    upper = quantile(R2_marginal, 0.975)
-  )
-}
-
-# Apply function to all 2-way interactions
-r2_2way <- lapply(interactions_2way, function(term) {
-  compute_marginal_R2(term, df_with_extremes, model_full)
-})
-
-names(r2_2way) <- interactions_2way
-r2_2way
-
-
-# Three-way interaction
-r2_3way <- compute_marginal_R2(interaction_3way, df_with_extremes, model_full)
-r2_3way
-
-results_df <- rbind(
-  do.call(rbind, r2_main),
-  do.call(rbind, r2_2way),
-  ThreeWay = r2_3way
-)
-
-results_df <- as.data.frame(results_df)
-results_df$Component <- rownames(results_df)
-
-# Optional: compute % of full model
-full_model_R2 <- compute_marginal_R2(
-  model = model_full,
-  data = df_with_extremes,
-  fixed_formula = PercChange ~ SymbiontTreatment * Cross_2 * Treatment
-)
-
-results_df$Relative_Contribution <- results_df$mean / full_model_R2["mean"]
-results_df$Relative_Contribution_Percent <- round(100 * results_df$Relative_Contribution, 1)
-
-colnames(results_df)[colnames(results_df) == "lower.2.5%"] <- "lower"
-colnames(results_df)[colnames(results_df) == "upper.97.5%"] <- "upper"
-
-results_df <- results_df[, c("Component", "mean", "lower", "upper", "Relative_Contribution_Percent")]
-
-library(ggplot2)
-
-ggplot(results_df, aes(x = Component, y = mean, fill = Component)) +
-  geom_bar(stat = "identity", width = 0.7) +
-  geom_text(aes(label = paste0(round(mean, 3), " (", round(lower,3), "-", round(upper,3), ")")),
-            vjust = -0.5, size = 3) +
-  theme_minimal(base_size = 14) +
-  ylab("Proportion of variance explained (marginal R²)") +
-  xlab("") +
-  ggtitle("Variance Partitioning: Main Effects vs Interactions") +
-  theme(legend.position = "none")
-
 ```
 
 ##Larval Size with Source Reef
@@ -2010,7 +1750,7 @@ plot(mcmc_obj)              # Trace and density plots
 autocorr.diag(mcmc_obj)     # Autocorrelation
 effectiveSize(mcmc_obj)     # Effective sample size
 
-# Create prediction grid
+# 1. Create prediction grid
 newdat_size_reef <- expand.grid(
   SymbiontTreatment = levels(df_with_extremes$SymbiontTreatment),
   Cross_2 = levels(df_with_extremes$Cross_2),
@@ -2022,13 +1762,20 @@ newdat_size_reef$SymbiontTreatment <- factor(newdat_size_reef$SymbiontTreatment,
 newdat_size_reef$Cross_2 <- factor(newdat_size_reef$Cross_2, levels = levels(df_with_extremes$Cross_2))
 newdat_size_reef$Treatment <- factor(newdat_size_reef$Treatment, levels = levels(df_with_extremes$Treatment))
 
-# Construct model matrix
+# Ensure factor levels match original data
+newdat_size_reef <- newdat_size_reef %>%
+  mutate(across(everything(), ~ factor(.x, levels = levels(df_with_extremes[[cur_column()]]))))
+
+#double check factors
+newdat_size_reef[1, ]  # Should show Ambient, BxB, C
+
+# 2. Construct model matrix
 X_full_s <- model.matrix(~ SymbiontTreatment * Cross_2 * Treatment, data = newdat_size_reef)
 
 # Align columns with posterior samples matrix
 X_s <- X_full_s[, colnames(mod.s.reef$Sol), drop = FALSE]
 
-# Generate posterior predictions matrix
+# 3. Generate posterior predictions matrix
 pred_matrix_s <- X_s %*% t(mod.s.reef$Sol)  # rows = newdat rows, cols = MCMC samples
 
 # Calculate posterior mean predictions
@@ -2038,7 +1785,7 @@ newdat_size_reef$pred_mean <- rowMeans(pred_matrix_s)
 newdat_size_reef$lower <- apply(pred_matrix_s, 1, quantile, probs = 0.025)
 newdat_size_reef$upper <- apply(pred_matrix_s, 1, quantile, probs = 0.975)
 
-# Calculate pMCMC values: two-tailed test for each posterior distribution
+# 4. Calculate pMCMC values: two-tailed test for each posterior distribution
 newdat_size_reef$pMCMC <- apply(pred_matrix_s, 1, function(x) {
   2 * min(mean(x > 0), mean(x < 0))
 })
@@ -2052,51 +1799,51 @@ newdat_size_reef$label_combined <- paste0(
   ifelse(newdat_size_reef$significant, "*", "")
 )
 
-#Global
-global_mean_post <- colMeans(pred_matrix_s)  # 1 vector of length = n MCMC samples
+# 5. Compare to control (Ambient × CC × C)
+control_post <- pred_matrix_s[1, ]  # 1st row = control
 
-# Subtract global mean from each group-level posterior draw
-diff_matrix_global <- sweep(pred_matrix_s, 2, global_mean_post, FUN = "-")
+diff_matrix_control <- sweep(pred_matrix_s, 2, control_post, FUN = "-")
 
-# pMCMC: two-tailed probability that the difference ≠ 0
-pMCMC_vals <- apply(diff_matrix_global, 1, function(x) {
-  mean(x < 0) * 2 * (mean(x < 0) < 0.5) + mean(x > 0) * 2 * (mean(x > 0) < 0.5)
+pMCMC_control <- apply(diff_matrix_control, 1, function(x) {
+  2 * min(mean(x > 0), mean(x < 0))
 })
-diff_matrix_global <- as.data.frame(t(apply(diff_matrix_global, 1, function(x) {
+
+diff_summary_control <- t(apply(diff_matrix_control, 1, function(x) {
   q <- quantile(x, probs = c(0.025, 0.975))
   c(mean_diff = mean(x), lower = q[1], upper = q[2])
-})))
+}))
 
-colnames(diff_matrix_global) <- c("mean_global", "lower_global", "upper_global")
+diff_summary_control <- as.data.frame(diff_summary_control)
+colnames(diff_summary_control) <- c("mean_control", "lower_control", "upper_control")
+diff_summary_control$pMCMC_control <- pMCMC_control
 
-diff_matrix_global$pMCMC <- pMCMC_vals
-diff_matrix_global$signif_label_global <- case_when(
-  pMCMC_vals < 0.005 ~ "**",
-  pMCMC_vals < 0.05  ~ "*",
-  TRUE               ~ ""
-)
-str(diff_matrix_global)
-
-
-diff_matrix_global$label_combined_global <- paste0(
-  round(diff_matrix_global$mean_global, 2),
-  diff_matrix_global$signif_label_global
+diff_summary_control$signif_label_control <- case_when(
+  pMCMC_control < 0.005 ~ "**",
+  pMCMC_control < 0.05  ~ "*",
+  TRUE                  ~ ""
 )
 
-diff_matrix_global <- as.data.frame(diff_matrix_global)
-diff_matrix_global$significant_vs_global <- with(diff_matrix_global, lower_global > 0 | upper_global < 0)
+diff_summary_control$label_combined_control <- paste0(
+  round(diff_summary_control$mean_control, 2),
+  diff_summary_control$signif_label_control
+)
 
-newdat_size_reef <- cbind(newdat_size_reef, diff_matrix_global)
+diff_summary_control$significant_vs_control <- with(
+  diff_summary_control,
+  lower_control > 0 | upper_control < 0
+)
 
+# 6. Combine with newdat.reef
+newdat_size_reef <- cbind(newdat_size_reef, diff_summary_control)
 
 # Plot predicted larval size changes with significance
-ggplot(newdat_size_reef, aes(x = Treatment, y = Cross_2, fill = pred_mean)) +
+ggplot(newdat_size_reef, aes(x = Treatment, y = Cross_2, fill = mean_control)) +
   geom_tile(color = "white") +
-  geom_text(aes(label = label_combined), color = "black", size = 4) +
+  geom_text(aes(label = signif_label_control), color = "black", size = 4) +
   facet_wrap(~ SymbiontTreatment) +
-  scale_fill_viridis_c(name = "Predicted Change in Size (%)") +
+  scale_fill_viridis_c(name = "Difference from Control") +
   theme_minimal() +
-  labs(title = "Predicted Percent Change in Larval Size",
+  labs(title = "Predicted Change in Size (%) Relative to Control (Ambient × CC × C)",
        x = "Treatment", y = "Host Genotype")
 
 #############################
@@ -2347,80 +2094,7 @@ summary_df <- results_df[, c("Effect",
 # Print
 print(summary_df)
 
-# ---- Variance Partitioning between SymbiontTreatment, Cross_2, and Treatment ----
 
-# Load packages
-library(vegan)
-library(dplyr)
-library(ggplot2)
-
-# ---- Step 1: Define predictors and response ----
-Y <- df_with_extremes$PercChangeSize
-# SymbiontTreatment, Cross_2, Treatment are factors in your df
-
-# ---- Step 2: Variance partitioning ----
-varpart_result <- varpart(Y, ~SymbiontTreatment, ~Cross_2, ~Treatment, data = df_with_extremes)
-
-# Get adjusted R² fractions
-fractions <- varpart_result$part$indfract$Adj.R.square
-fractions[fractions < 0] <- 0  # truncate negatives
-
-# ---- Step 3: RDA + permutation tests for unique fractions ----
-# Unique Symbiont
-rda_X1 <- rda(df_with_extremes$PercChangeSize ~ SymbiontTreatment + Condition(Cross_2 + Treatment), 
-              data = df_with_extremes)
-anova_X1 <- anova(rda_X1, permutations = 999)
-
-# Unique Cross
-rda_X2 <- rda(df_with_extremes$PercChangeSize ~ Cross_2 + Condition(SymbiontTreatment + Treatment), data = df_with_extremes)
-anova_X2 <- anova(rda_X2, permutations = 999)
-
-# Unique Treatment
-rda_X3 <- rda(df_with_extremes$PercChangeSize ~ Treatment + Condition(SymbiontTreatment + Cross_2), data = df_with_extremes)
-anova_X3 <- anova(rda_X3, permutations = 999)
-
-# ---- Step 4: Compile table for manuscript ----
-varpart_table <- data.frame(
-  Component = c("Unique Symbiont", "Unique Cross", "Unique Treatment", 
-                "Shared Symbiont/Cross", "Shared Symbiont/Treatment", 
-                "Shared Cross/Treatment", "Shared All", "Residual"),
-  Adj_R2 = c(fractions[1], fractions[2], fractions[3], 
-             fractions[4], fractions[5], fractions[6], fractions[7], fractions[8]),
-  F_stat = c(anova_X1$F[1], anova_X2$F[1], anova_X3$F[1], NA, NA, NA, NA, NA),
-  df_num = c(anova_X1$Df[1], anova_X2$Df[1], anova_X3$Df[1], NA, NA, NA, NA, NA),
-  df_den = c(anova_X1$Df[2], anova_X2$Df[2], anova_X3$Df[2], NA, NA, NA, NA, NA),
-  p_value = c(anova_X1$`Pr(>F)`[1], anova_X2$`Pr(>F)`[1], anova_X3$`Pr(>F)`[1], NA, NA, NA, NA, NA),
-  n = nrow(df_with_extremes)
-)
-
-# View the table
-varpart_table
-
-# ---- Step 5: Optional Venn diagram ----
-plot(varpart_result, bg = c("red", "blue", "green"), 
-     Xnames = c("Symbiont", "Cross", "Treatment"))
-
-# ---- Step 6: Optional ggplot barplot ----
-varpart_df <- varpart_table %>%
-  select(Component, Adj_R2)
-
-ggplot(varpart_df, aes(x = Component, y = Adj_R2, fill = Component)) +
-  geom_bar(stat = "identity", width = 0.7) +
-  geom_text(aes(label = sprintf("%.3f", Adj_R2)), vjust = -0.5, size = 3) +
-  theme_minimal(base_size = 14) +
-  ylab("Proportion of variance explained (adjusted R²)") +
-  xlab("") +
-  ggtitle("Variance Partitioning: Symbiont vs Cross vs Treatment") +
-  theme(legend.position = "none")
-
-# Save Venn diagram as PNG
-   # Just hover over the plot and right click to save image
-
-ggsave("C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/Size_VariancePartition_Barplot.png", plot = p, width = 10, height = 6, dpi = 300)
-
-write.csv(varpart_table, 
-          file = "C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/Size_varpart_table.csv",
-          row.names = FALSE)
 ```
 
 ##Cell Density with Source Reef
@@ -2469,6 +2143,7 @@ autocorr.diag(mcmc_obj)     # Autocorrelation
 effectiveSize(mcmc_obj)     # Effective sample size
 heidel.diag(mcmc_obj)  # Heidelberger-Welch convergence diagnostic
 
+# 1. Create prediction grid
 newdat2_subset <- expand.grid(
   SymbiontTreatment = levels(df_subset$SymbiontTreatment),
   Cross_2 = levels(df_subset$Cross_2),
@@ -2479,12 +2154,15 @@ newdat2_subset$SymbiontTreatment <- factor(newdat2_subset$SymbiontTreatment, lev
 newdat2_subset$Cross_2 <- factor(newdat2_subset$Cross_2, levels = levels(df_subset$Cross_2))
 newdat2_subset$Treatment <- factor(newdat2_subset$Treatment, levels = levels(df_subset$Treatment))
 
+#check factors
 lapply(newdat2_subset[, c("SymbiontTreatment", "Cross_2", "Treatment")], function(x) length(unique(x)))
+newdat2_subset[1, ]  # Should show Ambient, BxB, C
 
-
+# 2. Generate model matrix
 X_full_subset <- model.matrix(~ SymbiontTreatment * Cross_2 * Treatment, data = newdat2_subset)
 X_subset <- X_full_subset[, colnames(model_subset$Sol), drop = FALSE]
 
+# 3. Posterior predictions
 pred_matrix_subset <- X_subset %*% t(model_subset$Sol)
 newdat2_subset$pred_mean <- rowMeans(pred_matrix_subset)
 newdat2_subset$lower <- apply(pred_matrix_subset, 1, quantile, probs = 0.025)
@@ -2492,53 +2170,69 @@ newdat2_subset$upper <- apply(pred_matrix_subset, 1, quantile, probs = 0.975)
 newdat2_subset$significant <- !(newdat2_subset$lower < 0 & newdat2_subset$upper > 0)
 newdat2_subset$label_combined <- paste0(round(newdat2_subset$pred_mean, 2),
                                        ifelse(newdat2_subset$significant, "*", ""))
-# Calculate pMCMC values: two-tailed test for each posterior distribution
+# 4. Calculate pMCMC values: two-tailed test for each posterior distribution
 newdat2_subset$pMCMC <- apply(pred_matrix_subset, 1, function(x) {
   2 * min(mean(x > 0), mean(x < 0))
 })
 
-#Global mean
-# Vector of posterior means across all groups for each MCMC iteration
-global_mean_post_subset <- colMeans(pred_matrix_subset)
-# Difference: each group's posterior - global mean at each MCMC iteration
-diff_matrix_global_subset <- sweep(pred_matrix_subset, 2, global_mean_post_subset, FUN = "-")
-# pMCMC: two-tailed probability that the difference ≠ 0
-pMCMC_vals <- apply(diff_matrix_global_subset, 1, function(x) {
-  mean(x < 0) * 2 * (mean(x < 0) < 0.5) + mean(x > 0) * 2 * (mean(x > 0) < 0.5)
+# 5. Compare to control (Ambient × CC × C)
+# Make sure you use the first row of the posterior predictions for this subset
+control_post <- pred_matrix_subset[1, ]  # first row = Ambient × CC × C
+
+# Subtract control from all rows
+diff_matrix_control <- sweep(pred_matrix_subset, 2, control_post, FUN = "-")
+
+# Compute pMCMC for difference-from-control
+pMCMC_control <- apply(diff_matrix_control, 1, function(x) {
+  2 * min(mean(x > 0), mean(x < 0))
 })
-diff_summary_global_subset <- as.data.frame(t(apply(diff_matrix_global_subset, 1, function(x) {
+
+# Summarize difference-from-control
+diff_summary_control <- t(apply(diff_matrix_control, 1, function(x) {
   q <- quantile(x, probs = c(0.025, 0.975))
   c(mean_diff = mean(x), lower = q[1], upper = q[2])
-})))
+}))
 
-colnames(diff_summary_global_subset) <- c("mean_global", "lower_global", "upper_global")
+diff_summary_control <- as.data.frame(diff_summary_control)
+colnames(diff_summary_control) <- c("mean_control", "lower_control", "upper_control")
+diff_summary_control$pMCMC_control <- pMCMC_control
 
-diff_summary_global_subset$pMCMC <- pMCMC_vals
-diff_summary_global_subset$signif_label_global <- case_when(
-  pMCMC_vals < 0.005 ~ "**",
-  pMCMC_vals < 0.05  ~ "*",
-  TRUE               ~ ""
+diff_summary_control$signif_label_control <- case_when(
+  pMCMC_control < 0.005 ~ "**",
+  pMCMC_control < 0.05  ~ "*",
+  TRUE                  ~ ""
 )
 
-diff_summary_global_subset$label_combined_global <- paste0(
-  round(diff_summary_global_subset$mean_global, 2),
-  diff_summary_global_subset$signif_label_global
+diff_summary_control$label_combined_control <- paste0(
+  round(diff_summary_control$mean_control, 2),
+  diff_summary_control$signif_label_control
 )
 
-diff_summary_global_subset <- as.data.frame(diff_summary_global_subset)
-diff_summary_global_subset$significant_vs_global <- with(diff_summary_global_subset, lower_global > 0 | upper_global < 0)
+diff_summary_control$significant_vs_control <- with(
+  diff_summary_control,
+  lower_control > 0 | upper_control < 0
+)
 
-newdat2_subset <- cbind(newdat2_subset, diff_summary_global_subset)
+# Combine difference-from-control with your prediction grid
+newdat2_subset <- cbind(newdat2_subset, diff_summary_control)
 
-ggplot(newdat2_subset, aes(x = Treatment, y = Cross_2, fill = pred_mean)) +
+# Plot differences relative to control
+ggplot(newdat2_subset, aes(x = Treatment, y = Cross_2, fill = mean_control)) +
   geom_tile(color = "white") +
-  geom_text(aes(label = label_combined), color = "black", size = 4) +
+  geom_text(aes(label = label_combined_control), color = "black", size = 4) +
   facet_wrap(~ SymbiontTreatment) +
-  scale_fill_viridis_c(name = "Predicted cell change %") +
+  scale_fill_gradient2(
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    name = "Difference from Control (%)"
+  ) +
   theme_minimal() +
-  labs(title = "Predicted Change in Cell Density (No 35.5)",
-       x = "Treatment", y = "Host Genotype")
-
+  labs(
+    title = "Predicted Change in Cell Density Relative to Control (No 35.5)",
+    x = "Treatment", y = "Host Genotype"
+  )
 
 
 #############################
@@ -2856,81 +2550,6 @@ pairwise_diff_ts <- pairwise_diff_ts %>%
   mutate(significant = (lower > 0 | upper < 0))
 
 head(pairwise_diff_ts)
-
-# ---- Variance Partitioning between SymbiontTreatment, Cross_2, and Treatment ----
-
-# Load packages
-library(vegan)
-library(dplyr)
-library(ggplot2)
-
-# ---- Step 1: Define predictors and response ----
-Y <- df_subset$PercChangeCells
-# SymbiontTreatment, Cross_2, Treatment are factors in your df
-
-# ---- Step 2: Variance partitioning ----
-varpart_result <- varpart(Y, ~SymbiontTreatment, ~Cross_2, ~Treatment, data = df_subset)
-
-# Get adjusted R² fractions
-fractions <- varpart_result$part$indfract$Adj.R.square
-fractions[fractions < 0] <- 0  # truncate negatives
-
-# ---- Step 3: RDA + permutation tests for unique fractions ----
-# Unique Symbiont
-rda_X1 <- rda(df_subset$PercChangeCells ~ SymbiontTreatment + Condition(Cross_2 + Treatment), 
-              data = df_subset)
-anova_X1 <- anova(rda_X1, permutations = 999)
-
-# Unique Cross
-rda_X2 <- rda(df_subset$PercChangeCells ~ Cross_2 + Condition(SymbiontTreatment + Treatment), data = df_subset)
-anova_X2 <- anova(rda_X2, permutations = 999)
-
-# Unique Treatment
-rda_X3 <- rda(df_subset$PercChangeCells ~ Treatment + Condition(SymbiontTreatment + Cross_2), data = df_subset)
-anova_X3 <- anova(rda_X3, permutations = 999)
-
-# ---- Step 4: Compile table for manuscript ----
-varpart_table <- data.frame(
-  Component = c("Unique Symbiont", "Unique Cross", "Unique Treatment", 
-                "Shared Symbiont/Cross", "Shared Symbiont/Treatment", 
-                "Shared Cross/Treatment", "Shared All", "Residual"),
-  Adj_R2 = c(fractions[1], fractions[2], fractions[3], 
-             fractions[4], fractions[5], fractions[6], fractions[7], fractions[8]),
-  F_stat = c(anova_X1$F[1], anova_X2$F[1], anova_X3$F[1], NA, NA, NA, NA, NA),
-  df_num = c(anova_X1$Df[1], anova_X2$Df[1], anova_X3$Df[1], NA, NA, NA, NA, NA),
-  df_den = c(anova_X1$Df[2], anova_X2$Df[2], anova_X3$Df[2], NA, NA, NA, NA, NA),
-  p_value = c(anova_X1$`Pr(>F)`[1], anova_X2$`Pr(>F)`[1], anova_X3$`Pr(>F)`[1], NA, NA, NA, NA, NA),
-  n = nrow(df_subset)
-)
-
-# View the table
-varpart_table
-
-# ---- Step 5: Optional Venn diagram ----
-plot(varpart_result, bg = c("red", "blue", "green"), 
-     Xnames = c("Symbiont", "Cross", "Treatment"))
-
-# ---- Step 6: Optional ggplot barplot ----
-varpart_df <- varpart_table %>%
-  select(Component, Adj_R2)
-
-ggplot(varpart_df, aes(x = Component, y = Adj_R2, fill = Component)) +
-  geom_bar(stat = "identity", width = 0.7) +
-  geom_text(aes(label = sprintf("%.3f", Adj_R2)), vjust = -0.5, size = 3) +
-  theme_minimal(base_size = 14) +
-  ylab("Proportion of variance explained (adjusted R²)") +
-  xlab("") +
-  ggtitle("Variance Partitioning: Symbiont vs Cross vs Treatment") +
-  theme(legend.position = "none")
-
-# Save Venn diagram as PNG
-   # Just hover over the plot and right click to save image
-
-ggsave("C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/Density_VariancePartition_Barplot.png", plot = p, width = 10, height = 6, dpi = 300)
-
-write.csv(varpart_table, 
-          file = "C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/Density_varpart_table.csv",
-          row.names = FALSE)
 ```
 ##Survival GLMM with glmmTMB package and Source Reef
 ```{r}
@@ -2961,7 +2580,7 @@ df_long <- df_Surv %>%
 
 df_trimmed <- df_long %>%
   filter(!(temperature == "35.5" & as.numeric(as.character(timepoint)) > 6))
-df_trimmed <- readRDS("df_trimmed.rds")
+df_trimmed <- readRDS("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/df_trimmed.rds")
 
 # Step 2: Fit binomial GLMM
 model <- glmmPQL(
@@ -3123,18 +2742,17 @@ emm_df <- emm_df %>%
 
 emm_simple <- emmeans(mod_betabin2, specs = ~ symbiont * host * temperature, 
                       model = "response")  # if you want on response scale
-emm_df <- as.data.frame(emm_simple)
-n <- nrow(emm_df)
 
-contrast_mat <- diag(n) - matrix(1 / n, n, n)
-contrast_mat_named <- list("vs_global_mean" = contrast_mat)
+contrasts_vs_control <- contrast(
+  emm_simple,
+  method = "trt.vs.ctrl",
+  ref = which(with(as.data.frame(emm_simple),
+                   symbiont == "C" & host == "BxB" & temperature == "Ambient"))
+)
 
-contrasts_vs_global <- contrast(emm_simple, method = contrast_mat_named)
+summary_contrasts <- summary(contrasts_vs_control, infer = TRUE)
 
-summary_contrasts <- summary(contrasts_vs_global, infer = TRUE)
-
-summary_contrasts_df <- summary_contrasts %>%
-  as.data.frame() %>%
+summary_contrasts_df <- as.data.frame(summary_contrasts) %>%
   mutate(
     signif_label = case_when(
       p.value < 0.005 ~ "**",
@@ -3142,33 +2760,35 @@ summary_contrasts_df <- summary_contrasts %>%
       TRUE            ~ ""
     ),
     label_combined = paste0(round(estimate, 2), signif_label)
+  ) %>%
+  rename(
+    mean_control = estimate,
+    lower_control = asymp.LCL,
+    upper_control = asymp.UCL
   )
 
 print(summary_contrasts_df)
 
-# Your contrast summary as a data frame
-contrast_df <- summary_contrasts_df
+# Extract LHS (the treatment being compared to control)
+summary_contrasts_df <- summary_contrasts_df %>%
+  mutate(lhs = str_remove(contrast, " - C BxB Ambient$")) %>%
+  separate(lhs, into = c("symbiont", "host", "temperature"), sep = " ")
 
-# Rename the key columns in the contrast summary
-contrast_df <- contrast_df %>%
-  rename(
-    mean_global = estimate,
-    lower_global = asymp.LCL,
-    upper_global = asymp.UCL
+# Now you have symbiont, host, temperature columns
+print(summary_contrasts_df %>% select(contrast, symbiont, host, temperature, mean_control))
+
+# Combine with EMMs for plotting
+emm_df <- as.data.frame(emm_simple) %>%
+  left_join(summary_contrasts_df %>% 
+              select(symbiont, host, temperature, mean_control, lower_control, 
+                     upper_control, signif_label, label_combined),
+            by = c("symbiont", "host", "temperature"))
+
+#set the order of temps for plotting
+emm_df <- emm_df %>%
+  mutate(
+    temperature = factor(temperature, levels = c("Ambient", "31", "35.5"))
   )
-
-# The emmeans levels
-emm_levels <- emm_df %>% dplyr::select(symbiont, host, temperature)
-
-# Combine
-combined_results <- bind_cols(emm_levels, contrast_df)
-
-print(combined_results)
-
-emm_df <- bind_cols(emm_df, combined_results)
-
-# View the output
-print(emm_df)
 
 
 # Step 4: Plot heatmap
@@ -3178,16 +2798,11 @@ ggplot(emm_df, aes(x = temperature, y = host, fill = emmean)) +
   facet_wrap(~ symbiont) +
   scale_fill_gradient2(
     low = "blue", mid = "white", high = "red", midpoint = 0,
-    name = "Log-odds\nSurvival"
+    name = "Predicted Survival"
   ) +
   labs(x = "Temperature Treatment", y = "Host Genotype",
-       title = "Predicted Log-Odds of Survival with Significance") +
-  theme_minimal() +
-  theme(
-    strip.text = element_text(size = 12, face = "bold"),
-    axis.text.x = element_text(angle = 45, hjust = 1),
-    axis.text = element_text(size = 10)
-  )
+       title = "Predicted Survival vs Control (Ambient × BxB × C)") +
+  theme_minimal()
 
 
 # Option 1: Using sjstats
@@ -3254,7 +2869,7 @@ print(summary_df)
 write.csv(summary_df, "glmmTMB_relative_r2.csv", row.names = FALSE)
 saveRDS(summary_df, "glmmTMB_relative_r2.rds")
 ```
-Make a "mega heatmap" with all 4 traits using CROSS_2
+Make a "mega heatmap" with all 5 traits using CROSS_2
 ```{r}
 newdat_size_reef$Trait <- "Larval Size"
 newdat.reef$Trait <- "Fv/Fm"
@@ -3262,53 +2877,51 @@ newdat2_subset$Trait <- "Cell Density"
 emm_df$Trait <- "Survival"
 newdat_perc$Trait <- "Acquisition"
 
-emm_df <- emm_df %>%
-  rename(
-    mean_global = mean_global,     # Use mean_prob as prediction
-    label_combined_global = label_combined)
-
 colnames(emm_df)[1:3] <- c("SymbiontTreatment", "Cross_2", "Treatment")
-
-#emm_df$significant <- emm_df$p.value < 0.05
-
-colnames(newdat_size_reef)[13]   <- "pMCMC_global"
-colnames(newdat.reef)[13]   <- "pMCMC_global"
-colnames(newdat2_subset)[13]   <- "pMCMC_global"
-emm_df           <- emm_df %>% rename(pMCMC_global = p.value)
-colnames(newdat_perc)[13]   <- "pMCMC_global"
-
+emm_df <- emm_df %>%
+  rename(label_combined_control = label_combined)
 newdat_perc <- newdat_perc %>%
   rename(Cross_2 = Cross)
 
-newdat_perc <- newdat_perc %>%
-  mutate(Cross_2 = recode(Cross_2,
-                          "WW" = "TxT",
-                          "CC" = "BxB"))
+# Recode all Cross_2 consistently
+recode_cross <- function(df) {
+  df %>% 
+    mutate(Cross_2 = recode_factor(Cross_2,
+                                   "WW" = "WW",
+                                   "TxT" = "WW",
+                                   "CC" = "CC",
+                                   "BxB" = "CC"))
+}
 
-newdat2_subset <- newdat2_subset %>%
-  mutate(Cross_2 = recode(Cross_2,
-                          "WW" = "TxT",
-                          "CC" = "BxB"))
+newdat_size_reef <- recode_cross(newdat_size_reef)
+newdat.reef      <- recode_cross(newdat.reef)
+newdat2_subset   <- recode_cross(newdat2_subset)
+emm_df           <- recode_cross(emm_df)
+newdat_perc      <- recode_cross(newdat_perc)
 
+# Combine all traits
 big_heatmap_df <- bind_rows(newdat_size_reef, newdat.reef, newdat2_subset, emm_df, newdat_perc)
 
-ggplot(big_heatmap_df, aes(x = Treatment, y = Cross_2, fill = mean_global)) +
+# Make sure the factor levels are consistent and ordered
+big_heatmap_df$Cross_2 <- factor(big_heatmap_df$Cross_2, levels = c("CC", "WW"))
+
+# Then plot
+ggplot(big_heatmap_df, aes(x = Treatment, y = Cross_2, fill = mean_control)) +
   geom_tile(color = "white") +
-  geom_text(aes(label = label_combined_global), color = "black", size = 3) +
+  geom_text(aes(label = label_combined_control), color = "black", size = 3) +
   facet_grid(Trait ~ SymbiontTreatment) +
   scale_fill_gradient2(
     name = "Predicted Value",
-    low = "blue",      # for negative values
-    mid = "white",     # for zero
-    high = "red",      # for positive values
-    midpoint = 0       # center the scale at zero
+    low = "blue",
+    mid = "white",
+    high = "red",
+    midpoint = 0
   ) +
   theme_minimal(base_size = 10) +
   labs(
     title = "Predicted Trait Responses by Treatment and Symbiont",
-    x = "Treatment", y = "Family"
+    x = "Treatment", y = "Cross"
   )
-
 
 ```
 
@@ -3318,11 +2931,11 @@ signed_log <- function(x) {
   sign(x) * log1p(abs(x))
 }
 
-newdat.reef$mean_global <- signed_log(newdat.reef$mean_global)
-newdat_size_reef$mean_global <- signed_log(newdat_size_reef$mean_global)
-newdat2_subset$mean_global <- signed_log(newdat2_subset$mean_global)  # Cell density, all positive 
-newdat_perc$mean_global <- signed_log(newdat_perc$mean_global) 
-# emm_df$pred_mean left as is (survival log-odds)
+newdat.reef$mean_control_sign <- signed_log(newdat.reef$mean_control)
+newdat_size_reef$mean_control_sign <- signed_log(newdat_size_reef$mean_control)
+newdat2_subset$mean_control_sign <- signed_log(newdat2_subset$mean_control)  # Cell density, all positive 
+newdat_perc$mean_control_sign <- signed_log(newdat_perc$mean_control) 
+emm_df$mean_control_sign <- (emm_df$mean_control) #left as is (survival log-odds)
 
 big_heatmap_df_log <- bind_rows(newdat_size_reef, newdat.reef, newdat2_subset, emm_df, newdat_perc)
 
@@ -3347,12 +2960,12 @@ big_heatmap_df_log <- big_heatmap_df_log %>%
 #    )
 #  )
 
-# Compute 5th and 95th percentile of mean_global across the whole dataset
-lims <- quantile(big_heatmap_df_log$mean_global, probs = c(0.05, 0.95), na.rm = TRUE)
+# Compute 5th and 95th percentile of mean_control across the whole dataset
+lims <- quantile(big_heatmap_df_log$mean_control, probs = c(0.05, 0.95), na.rm = TRUE)
 
-mega_heatmap <- ggplot(big_heatmap_df_log, aes(x = Treatment_Symbiont, y = Cross_2, fill = mean_global)) +
+mega_heatmap <- ggplot(big_heatmap_df_log, aes(x = Treatment_Symbiont, y = Cross_2, fill = mean_control_sign)) +
   geom_tile(color = "black") +
-  geom_text(aes(label = label_combined_global), color = "black", size = 3) +
+  geom_text(aes(label = label_combined_control), color = "black", size = 3) +
   facet_grid(Trait ~ .) +
   scale_fill_gradient2(
     name = "Fold Change",
@@ -3377,31 +2990,46 @@ mega_heatmap
 library(dplyr)
 
 # Normalize within each Trait
+# Define the controls
 big_heatmap_df_log_scaled <- big_heatmap_df_log %>%
- # group_by(Trait) %>%
-  mutate(scaled_mean = scale(mean_global)) %>%
- # ungroup() %>%
-  # Create a logical column 'significant' based on presence of '*' in label_combined_global
-  mutate(significant = str_detect(label_combined_global, "\\*+")) %>%
-  # Only fill significant cells, else NA (white)
-  mutate(scaled_mean_sig = ifelse(significant, mean_global, NA)) %>%
-  # Only label significant cells (optional)
-  mutate(label_sig = ifelse(significant, label_combined_global, NA))
+  mutate(scaled_mean = scale(mean_control_sign)) %>%
+  mutate(significant = str_detect(label_combined_control, "\\*+")) %>%
+  mutate(scaled_mean_sig = ifelse(significant, mean_control_sign, NA)) %>%
+  mutate(label_sig = ifelse(significant, label_combined_control, NA)) %>%
+  # Force control cells to always be 0 with no stars
+  mutate(
+    label_combined_control = ifelse(
+      Treatment == "Ambient" & Cross_2 == "CC" & SymbiontTreatment == "C",
+      "0",
+      label_combined_control
+    ),
+    scaled_mean = ifelse(
+      Treatment == "Ambient" & Cross_2 == "CC" & SymbiontTreatment == "C",
+      0,
+      scaled_mean
+    ),
+    scaled_mean_sig = ifelse(
+      Treatment == "Ambient" & Cross_2 == "CC" & SymbiontTreatment == "C",
+      0,
+      scaled_mean_sig
+    )
+  )
+
 
 mega_heatmap_sig <- ggplot(big_heatmap_df_log_scaled, aes(x = Treatment_Symbiont, y = Cross_2)) +
   geom_tile(aes(fill = scaled_mean_sig), color = "black") +
-  geom_text(aes(label = label_combined_global), color = "black", size = 3) +
+  geom_text(aes(label = label_combined_control), color = "black", size = 3) +
   facet_grid(Trait ~ .) +
   scale_fill_gradient2(
-    name = "Scaled Mean\n(Fold Change)",
+    name = "Fold Change",
     low = "#3288bd", mid = "white", high = "red", midpoint = 0,
     na.value = "white"
   ) +
   theme_minimal(base_size = 10) +
   labs(
     title = "Significant Trait Responses by Treatment and Symbiont",
-    x = "Treatment and Symbiont",
-    y = "Family"
+    x = "Temperature",
+    y = "Population of Origin"
   ) +
   theme(
     axis.text.x = element_text(angle = 45, hjust = 1),
@@ -3410,7 +3038,7 @@ mega_heatmap_sig <- ggplot(big_heatmap_df_log_scaled, aes(x = Treatment_Symbiont
 
 mega_heatmap_sig
 
-ggsave("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/mega_heatmap_global_mean_percentages.png", plot = mega_heatmap_sig, width = 7, height = 5, dpi = 300)
+ggsave("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/mega_heatmap_control_contrast.png", plot = mega_heatmap_sig, width = 7, height = 5, dpi = 300)
 
 ```
 ### FINAL HEAT MAP
@@ -5867,7 +5495,7 @@ summary_df <- ipam %>%
   summarize(PercentageWithCells = mean(FvFm > 0, na.rm = TRUE) * 100)
 
 #create figure
-ggplot(ipam, aes(x = TIMEPOINT, y = PercChangeCells, color = TREATMENT)) +
+ggplot(ipam, aes(x = Timepoint, y = PercChangeCells, color = TREATMENT)) +
   geom_line(size = 1.2) +
   geom_point(size = 3) +
   labs(
@@ -6002,11 +5630,12 @@ summary_stats <- ipam_taxa_survived %>%
   )
 
 
-plot1_perc <- ggplot(summary_stats, aes(x = Timepoint, y = mean_pct, color = Cross, shape = SymbiontTreatment)) +
-  geom_point(size = 3) +
+plot1_perc <- ggplot(summary_stats, aes(x = Timepoint, y = mean_pct, 
+                                        color = Cross, shape = SymbiontTreatment)) +
+  geom_point(size = 3, stroke = 1, fill = "white") +   # black border around points
   geom_line(aes(group = SymbiontTreatment), size = 1) +
   geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper, group = SymbiontTreatment), width = 0.3) +
-  facet_grid(Cross ~ Treatment) +
+  facet_wrap(~Treatment, ncol = 3) +
   scale_color_manual(values = c("CC" = "#1f77b4", "WW" = "#ff7f0e")) +
   labs(
     title = "Percentage of Larvae with Cells Over Time",
@@ -6016,74 +5645,135 @@ plot1_perc <- ggplot(summary_stats, aes(x = Timepoint, y = mean_pct, color = Cro
   ) +
   theme_classic()
 
+plot1_perc
+
+summary_stats <- summary_stats %>%
+  mutate(Timepoint = as.numeric(as.character(Timepoint)))
+
+
+plot1_perc <- ggplot(summary_stats, 
+                     aes(x = Timepoint, y = mean_pct, 
+                         group = interaction(Cross, SymbiontTreatment))) +
+
+  # error bars (grouped same as lines/points)
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper,
+                    group = interaction(Cross, SymbiontTreatment),
+                    color = Cross),
+                width = 0.3) +
+
+  # lines colored by Cross
+  geom_line(aes(color = Cross), size = 1) +
+
+  # points: fill maps to Cross, shape to SymbiontTreatment, border (color) fixed black
+  geom_point(aes(fill = Cross, shape = SymbiontTreatment),
+             color = "black",    # border color
+             size = 3,
+             stroke = 0.8) +     # border thickness
+
+  # facets
+  facet_wrap(~ Treatment, ncol = 3) +
+
+  # scales: same palette for fill and line color
+  scale_fill_manual(values = c("CC" = "#1f77b4", "WW" = "#ff7f0e")) +
+  scale_color_manual(values = c("CC" = "#1f77b4", "WW" = "#ff7f0e")) +
+
+  # shapes must be in 21:25 to allow fill + border
+  scale_shape_manual(values = c("C" = 21, "D" = 24)) +
+  
+  scale_x_continuous(breaks = seq(0, 22, 2)) +   # every day 1–22
+
+  labs(title = "Percentage of Larvae with Cells Over Time",
+       x = "Days",
+       y = "Mean Larvae with Symbionts (%)",
+       color = "Population of Origin",
+       fill  = "Population of Origin",
+       shape = "Symbiont") +
+  theme_classic()
+
+plot1_perc 
 ```
 Combine PercentageWithCells and Cell Density
 ```{r}
 # Load patchwork library
 library(patchwork)
 
-# Second plot: Cell Density
-summary_df_cells <- summary_df_cells %>%
-  mutate(Reef = if_else(Cross %in% c("B.T.2xB.T.4", "B.T.4xB.T.2", "B.T.8xB.T.2"), "CC", "WW"))
-
-# Step 1: average within UniqueID first
-uniqueID_summary <- summary_df_cells %>%
-  group_by(DayNumber, Reef, CellType, Treatment, TubeID) %>%
-  summarise(
-    mean_CellDensity_perID = mean(CellDensity, na.rm = TRUE),
-    .groups = "drop"
+# 1. Create all combinations of grouping variables
+day0_dummy <- cells_long %>%
+  distinct(TubeID, CellType, Cross, Treatment, Reef) %>%   # get unique groups
+  mutate(
+    T.End = 0,
+    CellDensity = 0
   )
 
-# Step 2: summarize across UniqueIDs to get overall group summary stats
-summary_df_cells_grouped <- uniqueID_summary %>%
+# 2. Combine with end-of-experiment data
+cells_combined <- bind_rows(day0_dummy, cells_long %>% filter(T.End == 23))
+
+# 3. Optional: reorder by TubeID, CellType, etc.
+cells_combined <- cells_combined %>%
+  arrange(TubeID, CellType, Cross, Treatment, T.End)
+
+summary_df_cells_grouped <- cells_combined %>%
+  mutate(
+    Reef = if_else(Cross %in% c("B.T.2xB.T.4", "B.T.4xB.T.2", "B.T.8xB.T.2"), "CC", "WW"),
+    DayNumber = T.End
+  ) %>%
   group_by(DayNumber, Reef, CellType, Treatment) %>%
   summarise(
-    mean_CellDensity = mean(mean_CellDensity_perID, na.rm = TRUE),
-    sd_CellDensity = sd(mean_CellDensity_perID, na.rm = TRUE),
-    n = n(),  # number of unique UniqueIDs
+    mean_CellDensity = mean(CellDensity, na.rm = TRUE),
+    sd_CellDensity = sd(CellDensity, na.rm = TRUE),
+    n = n(),
     se = sd_CellDensity / sqrt(n),
     ci_lower = mean_CellDensity - qt(0.975, df = n - 1) * se,
     ci_upper = mean_CellDensity + qt(0.975, df = n - 1) * se,
     .groups = "drop"
   )
 
+# plot
+plot_cells <- ggplot(summary_df_cells_grouped, 
+                     aes(x = DayNumber, y = mean_CellDensity, 
+                         group = interaction(Reef, CellType))) +
 
-custom_Reef_colors <- c("CC" = "blue", "WW" = "red")  # Adjust as needed
+  # error bars colored by Reef
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper,
+                    group = interaction(Reef, CellType),
+                    color = Reef),
+                width = 0.3) +
 
-plot2 <- ggplot(summary_df_cells_grouped, aes(x = DayNumber, y = mean_CellDensity, color = Reef, shape = CellType)) +
-  geom_point(alpha = 0.8, size = 3) +
-  geom_line(aes(group = interaction(Reef, CellType)), alpha = 0.6) +
-  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper, group = interaction(Reef, CellType)), width = 0.3, alpha = 0.7) +
-  facet_grid(Reef ~ Treatment) +
-  scale_color_manual(values = custom_Reef_colors) +
-  scale_x_continuous(
-    breaks = seq(0, 22, by = 2),
-    labels = as.character(seq(0, 22, by = 2))
-  ) +
-  labs(
-    title = "Cell Density by Timepoint for Each Cross",
-    x = "Days",
-    y = "Mean Cell Density",
-    color = "Cross",
-    shape = "Cell Type"
-  ) +
-  theme_classic() +
-  theme(
-    strip.text = element_text(size = 12),
-    axis.text = element_text(size = 10),
-    legend.title = element_text(size = 12),
-    legend.text = element_text(size = 10)
-  )
+  # lines colored by Reef
+  geom_line(aes(color = Reef), size = 1) +
 
-summary_df_cells_grouped %>%
-  group_by(DayNumber, Reef, CellType, Treatment) %>%
-  tally()
+  # points with fill = Reef, shape = CellType, black border
+  geom_point(aes(fill = Reef, shape = CellType),
+             color = "black",
+             size = 3,
+             stroke = 0.8) +
 
+  # facets by Treatment
+  facet_wrap(~ Treatment, ncol = 3) +
+
+  # color/fill scales
+  scale_fill_manual(values = c("CC" = "#1f77b4", "WW" = "#ff7f0e")) +
+  scale_color_manual(values = c("CC" = "#1f77b4", "WW" = "#ff7f0e")) +
+
+  # shape scale (21-25 to allow fill + border)
+  scale_shape_manual(values = c("C" = 21, "D" = 24)) +
+
+  # x axis as numeric days
+  scale_x_continuous(breaks = seq(0, 23, 2)) +
+
+  labs(title = "Larval Cell Density Over Time",
+       x = "Days",
+       y = "Mean Cell Density",
+       color = "Population of Origin",
+       fill  = "Population of Origin",
+       shape = "Cell Type") +
+
+  theme_classic()
 
 
 
 # Combine plots using patchwork
-combined_plot <- plot1_perc / plot2  # Stack vertically
+combined_plot <- plot1_perc / plot_cells  # Stack vertically
 # Alternatively, to place them side by side:
 # combined_plot <- plot1 + plot2
 
@@ -6091,7 +5781,7 @@ combined_plot <- plot1_perc / plot2  # Stack vertically
 combined_plot
 
 # Save the combined plot
-ggsave("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/combined_plot_percentcells_density_by_Reef.png", plot = combined_plot, width = 10, height = 8, dpi = 300)
+ggsave("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/combined_plot_percentcells_density_by_Reef2.png", plot = combined_plot, width = 10, height = 8, dpi = 300)
 
 
 ```
@@ -7780,6 +7470,7 @@ plot(mcmc_obj)              # Trace and density plots
 autocorr.diag(mcmc_obj)     # Autocorrelation
 effectiveSize(mcmc_obj)     # Effective sample size
 
+# 1. Create prediction grid
 newdat_perc <- expand.grid(
   SymbiontTreatment = levels(ipam$SymbiontTreatment),
   Cross = levels(ipam$Cross),
@@ -7792,10 +7483,11 @@ newdat_perc$Treatment <- factor(newdat_perc$Treatment, levels = levels(ipam$Trea
 
 lapply(newdat_perc[, c("SymbiontTreatment", "Cross", "Treatment")], function(x) length(unique(x)))
 
-
+# 2. Generate model matrix
 X_full_subset <- model.matrix(~ SymbiontTreatment * Cross * Treatment, data = newdat_perc)
 X_subset <- X_full_subset[, colnames(model_perc$Sol), drop = FALSE]
 
+# 3. Posterior predictions
 pred_matrix_subset <- X_subset %*% t(model_perc$Sol)
 newdat_perc$pred_mean <- rowMeans(pred_matrix_subset)
 newdat_perc$lower <- apply(pred_matrix_subset, 1, quantile, probs = 0.025)
@@ -7803,47 +7495,52 @@ newdat_perc$upper <- apply(pred_matrix_subset, 1, quantile, probs = 0.975)
 newdat_perc$significant <- !(newdat_perc$lower < 0 & newdat_perc$upper > 0)
 newdat_perc$label_combined <- paste0(round(newdat_perc$pred_mean, 2),
                                        ifelse(newdat_perc$significant, "*", ""))
-# Calculate pMCMC values: two-tailed test for each posterior distribution
+
+# 4. Calculate pMCMC values: two-tailed test for each posterior distribution
 newdat_perc$pMCMC <- apply(pred_matrix_subset, 1, function(x) {
   2 * min(mean(x > 0), mean(x < 0))
 })
 
-#Global mean
-# Vector of posterior means across all groups for each MCMC iteration
-global_mean_post_subset <- colMeans(pred_matrix_subset)
-# Difference: each group's posterior - global mean at each MCMC iteration
-diff_matrix_global_subset <- sweep(pred_matrix_subset, 2, global_mean_post_subset, FUN = "-")
-# pMCMC: two-tailed probability that the difference ≠ 0
-pMCMC_vals <- apply(diff_matrix_global_subset, 1, function(x) {
-  mean(x < 0) * 2 * (mean(x < 0) < 0.5) + mean(x > 0) * 2 * (mean(x > 0) < 0.5)
+# 5. Compare to control (Ambient x CC x C)
+control_post <- pred_matrix_subset[1, ]  # 1st row = control
+
+diff_matrix_control <- sweep(pred_matrix_subset, 2, control_post, FUN = "-")
+
+pMCMC_control <- apply(diff_matrix_control, 1, function(x) {
+  2 * min(mean(x > 0), mean(x < 0))
 })
-diff_summary_global_subset <- as.data.frame(t(apply(diff_matrix_global_subset, 1, function(x) {
+
+diff_summary_control <- t(apply(diff_matrix_control, 1, function(x) {
   q <- quantile(x, probs = c(0.025, 0.975))
   c(mean_diff = mean(x), lower = q[1], upper = q[2])
-})))
+}))
 
-colnames(diff_summary_global_subset) <- c("mean_global", "lower_global", "upper_global")
+diff_summary_control <- as.data.frame(diff_summary_control)
+colnames(diff_summary_control) <- c("mean_control", "lower_control", "upper_control")
+diff_summary_control$pMCMC_control <- pMCMC_control
 
-diff_summary_global_subset$pMCMC <- pMCMC_vals
-diff_summary_global_subset$signif_label_global <- case_when(
-  pMCMC_vals < 0.005 ~ "**",
-  pMCMC_vals < 0.05  ~ "*",
-  TRUE               ~ ""
+diff_summary_control$signif_label_control <- case_when(
+  pMCMC_control < 0.005 ~ "**",
+  pMCMC_control < 0.05  ~ "*",
+  TRUE                  ~ ""
 )
 
-diff_summary_global_subset$label_combined_global <- paste0(
-  round(diff_summary_global_subset$mean_global, 2),
-  diff_summary_global_subset$signif_label_global
+diff_summary_control$label_combined_control <- paste0(
+  round(diff_summary_control$mean_control, 2),
+  diff_summary_control$signif_label_control
 )
 
-diff_summary_global_subset <- as.data.frame(diff_summary_global_subset)
-diff_summary_global_subset$significant_vs_global <- with(diff_summary_global_subset, lower_global > 0 | upper_global < 0)
+diff_summary_control$significant_vs_control <- with(
+  diff_summary_control,
+  lower_control > 0 | upper_control < 0
+)
 
-newdat_perc <- cbind(newdat_perc, diff_summary_global_subset)
+# 6. Combine and plot
+newdat_perc <- cbind(newdat_perc, diff_summary_control)
 
-ggplot(newdat_perc, aes(x = Treatment, y = Cross, fill = pred_mean)) +
+ggplot(newdat_perc, aes(x = Treatment, y = Cross, fill = mean_control)) +
   geom_tile(color = "white") +
-  geom_text(aes(label = label_combined), color = "black", size = 4) +
+  geom_text(aes(label = label_combined_control), color = "black", size = 4) +
   facet_wrap(~ SymbiontTreatment) +
   scale_fill_viridis_c(name = "Predicted cell change %") +
   theme_minimal() +
