@@ -114,6 +114,9 @@ df <- df %>%
 
 #0 = alive
 df_with_extremes <- df %>%
+  # Recode Percent_Survival_atend == 0 as Dead
+  mutate(`Alive..Dead..Sampled` = ifelse(Percent_Survival_atend == 0, "Dead", `Alive..Dead..Sampled`)) %>%
+  # Create Status column: 0 = Alive, 1 = Dead
   mutate(Status = ifelse(`Alive..Dead..Sampled` == "Alive", 0, 1))
 
 #Long-format Cell Density (From No.Cells1–3)
@@ -801,11 +804,162 @@ metadata_clean$Timepoint <- as.numeric(as.character(metadata_clean$Timepoint))
 
 X<-cbind(metadata_clean$Treatment, metadata_clean$SymbiontTreatment, metadata_clean$ReefMom)# if you don’t have covariates, do not include them
 # if observations are right censored:
+cox <- coxph(
+  Surv(Timepoint, Status) ~ Treatment + SymbiontTreatment + Cross_2,
+  data = metadata_clean,
+  method = "breslow"
+)
 cox<- coxph (Surv(Timepoint, Status)~ X, method='breslow', data = metadata_clean)
 summary(cox)
 
+cox_td <- coxph(
+  Surv(Timepoint, Status) ~ SymbiontTreatment + Cross_2 + 
+    tt(Treat31) + tt(Treat35.5),
+  data = transform(metadata_clean,
+                   Treat31 = as.numeric(Treatment == "31"),
+                   Treat35.5 = as.numeric(Treatment == "35.5")),
+  method = "breslow",
+  tt = function(x, t, ...) x * log(t)
+)
+summary(cox_td)
+# Create time grid
+time_grid <- seq(1, 22, length.out = 100)
+
+b <- coef(cox_td)
+
+# Compute HR for each treatment
+df <- data.frame(
+  Time = rep(time_grid, 2),
+  HR = c(exp(b["tt(Treat31)"] * log(time_grid + 1)),
+         exp(b["tt(Treat35.5)"] * log(time_grid + 1))),
+  Treatment = rep(c("31 °C", "35.5 °C"), each = length(time_grid)))
+
+ggplot(df, aes(x = Time, y = HR, color = Treatment)) +
+  geom_line(size = 1.2) +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  labs(x = "Time (days)", y = "Hazard Ratio vs Ambient") +
+  theme_minimal() +
+  scale_color_manual(values = c("blue", "red"))
+
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Time grid (experiment ran 22 days)
+time_grid <- seq(1, 22, length.out = 100)
+
+# Coefficients and covariance matrix
+b <- coef(cox_td)
+V <- vcov(cox_td)  # covariance matrix
+
+# Function to compute HR(t) and CI
+compute_hr_ci <- function(coef_name, time_grid, b, V) {
+  logt <- log(time_grid + 1)          # log(time+1) for tt() term
+  hr <- exp(b[coef_name] * logt)      # HR(t)
+  
+  # Standard error for log(HR(t)) = log(HR) * sqrt(var)
+  se_log_hr <- sqrt(logt^2 * V[coef_name, coef_name])
+  
+  # 95% CI
+  hr_lower <- exp(log(hr) - 1.96 * se_log_hr)
+  hr_upper <- exp(log(hr) + 1.96 * se_log_hr)
+  
+  data.frame(
+    Time = time_grid,
+    HR = hr,
+    HR_lower = hr_lower,
+    HR_upper = hr_upper,
+    Treatment = coef_name
+  )
+}
+
+# Compute for both treatments
+df_31  <- compute_hr_ci("tt(Treat31)", time_grid, b, V)
+df_355 <- compute_hr_ci("tt(Treat35.5)", time_grid, b, V)
+
+# Combine into one data frame
+df_plot <- bind_rows(df_31, df_355)
+df_plot$Treatment <- recode(df_plot$Treatment, 
+                            "tt(Treat31)" = "31 °C",
+                            "tt(Treat35.5)" = "35.5 °C")
+
+ggplot(df_plot, aes(x = Time, y = HR, color = Treatment, fill = Treatment)) +
+  geom_line(size = 1.2) +
+  geom_ribbon(aes(ymin = HR_lower, ymax = HR_upper), alpha = 0.2, color = NA) +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  labs(x = "Time (days)", y = "Hazard Ratio vs Ambient") +
+  theme_minimal() +
+  scale_color_manual(values = c("blue", "red")) +
+  scale_fill_manual(values = c("blue", "red"))
+
+cox_3way <- coxph(
+  Surv(Timepoint, Status) ~ SymbiontTreatment * Treatment * Cross_2,
+  data = metadata_clean,
+  method = "breslow"
+)
+summary(cox_3way)
+
+metadata_clean2 <- transform(metadata_clean,
+                            Treat31 = as.numeric(Treatment == "31"),
+                            Treat35.5 = as.numeric(Treatment == "35.5"))
+library(survival)
+
+# Time-dependent function: linear in log(time)
+tt_fun <- function(x, t, ...) x * log(t)
+
+cox_td_3way <- coxph(
+  Surv(Timepoint, Status) ~ SymbiontTreatment * Cross_2 +
+    tt(Treat31) + tt(Treat35.5) +
+    SymbiontTreatment:tt(Treat31) + SymbiontTreatment:tt(Treat35.5) +
+    Cross_2:tt(Treat31) + Cross_2:tt(Treat35.5) +
+    SymbiontTreatment:Cross_2:tt(Treat31) + SymbiontTreatment:Cross_2:tt(Treat35.5),
+  data = metadata_clean2,
+  tt = tt_fun,
+  method = "breslow"
+)
+summary(cox_td_3way)
+
+time_grid <- 1:22  # experiment duration
+
+# Extract coefficients
+coefs <- coef(cox_td_3way)
+
+# Example: HR for 31°C, Symbiont C, Cross reference (baseline)
+hr_31_C_ref <- exp(coefs["tt(Treat31)"] * log(time_grid))
+# HR for 35.5°C, Symbiont C, Cross reference (baseline)
+hr_355_C_ref <- exp(coefs["tt(Treat35.5)"] * log(time_grid))
+
+# HR for 31°C, Symbiont D, Cross TxT
+hr_31_D_TxT <- exp(
+  coefs["tt(Treat31)"] * log(time_grid) +
+  coefs["SymbiontTreatmentD:tt(Treat31)"] * log(time_grid) +
+  coefs["Cross_2TxT:tt(Treat31)"] * log(time_grid) +
+  coefs["SymbiontTreatmentD:Cross_2:tt(Treat31)"] * log(time_grid)
+)
+
+# HR for 35.5°C, Symbiont D, Cross TxT
+hr_355_D_TxT <- exp(
+  coefs["tt(Treat35.5)"] * log(time_grid) +
+  coefs["SymbiontTreatmentD:tt(Treat35.5)"] * log(time_grid) +
+  coefs["Cross_2TxT:tt(Treat35.5)"] * log(time_grid) +
+  coefs["SymbiontTreatmentD:Cross_2:tt(Treat35.5)"] * log(time_grid)
+)
+library(ggplot2)
+df_hr <- data.frame(
+  Day = rep(time_grid, 4),
+  HR = c(hr_31_C_ref, hr_31_D_TxT, hr_355_C_ref, hr_355_D_TxT),
+  Group = rep(c("31°C C BxB", "31°C D TxT", "35.5°C C BxB", "35.5°C D TxT"), each = length(time_grid))
+)
+
+ggplot(df_hr, aes(x = Day, y = HR, color = Group)) +
+  geom_line(size = 1.2) +
+  labs(x = "Time (days)", y = "Hazard Ratio vs Ambient") +
+  theme_minimal() +
+  scale_color_brewer(palette = "Set1")
+
+
 # Test proportional hazards assumption
-ph_test <- cox.zph(cox_model)
+ph_test <- cox.zph(cox_3way)
 print(ph_test)
 
 #Call:
@@ -1024,6 +1178,168 @@ survival_curves_facet_Symb <- ggsurv$plot +
   )
 
 print(survival_curves_facet_Symb)
+
+time_grid <- 1:22  # experiment duration in days
+coefs <- coef(cox_td_3way)
+library(dplyr)
+
+combinations <- expand.grid(
+  SymbiontTreatment = c("C", "D"),
+  Temperature = c("31", "35.5"),
+  Cross_2 = c("BxB", "TxT")
+)
+compute_hr <- function(symbiont, temp, cross, coefs, time_grid) {
+  
+  # Identify the relevant tt term
+  tt_term <- if(temp == "31") "tt(Treat31)" else "tt(Treat35.5)"
+  
+  # Start with main time-dependent effect
+  hr_log <- coefs[tt_term] * log(time_grid)
+  
+  # Symbiont × tt
+  sym_tt <- paste0("SymbiontTreatmentD:", tt_term)
+  if(symbiont == "D" & sym_tt %in% names(coefs)) hr_log <- hr_log + coefs[sym_tt] * log(time_grid)
+  
+  # Cross × tt
+  cross_tt <- paste0("Cross_2TxT:", tt_term)
+  if(cross == "TxT" & cross_tt %in% names(coefs)) hr_log <- hr_log + coefs[cross_tt] * log(time_grid)
+  
+  # Three-way interaction
+  threeway <- paste0("SymbiontTreatmentD:", "Cross_2TxT:", tt_term)
+  if(symbiont == "D" & cross == "TxT" & threeway %in% names(coefs)) hr_log <- hr_log + coefs[threeway] * log(time_grid)
+  
+  exp(hr_log)
+}
+hr_list <- mapply(
+  FUN = compute_hr,
+  symbiont = combinations$SymbiontTreatment,
+  temp = combinations$Temperature,
+  cross = combinations$Cross_2,
+  MoreArgs = list(coefs = coefs, time_grid = time_grid),
+  SIMPLIFY = FALSE
+)
+df_hr <- do.call(rbind, lapply(1:nrow(combinations), function(i) {
+  data.frame(
+    Day = time_grid,
+    HR = hr_list[[i]],
+    Group = paste(combinations$Temperature[i], combinations$SymbiontTreatment[i], combinations$Cross_2[i], sep = "°C ")
+  )
+}))
+ggplot(df_hr, aes(x = Day, y = HR, color = Group)) +
+  geom_line(size = 1.2) +
+  labs(x = "Time (days)", y = "Hazard Ratio vs Ambient") +
+  theme_minimal() +
+  scale_color_brewer(palette = "Set1")
+
+# 1️⃣ Compute HR for baseline group: Ambient BxB + C
+baseline_hr <- compute_hr(symbiont = "C", temp = "31", cross = "BxB", coefs = coefs, time_grid = time_grid)
+# If you want Ambient group to include both temps as reference, repeat accordingly
+
+# 2️⃣ Adjust all HRs relative to baseline
+df_hr <- do.call(rbind, lapply(1:nrow(combinations), function(i) {
+  hr_adj <- hr_list[[i]] / baseline_hr  # divide by baseline to get relative HR
+  data.frame(
+    Day = time_grid,
+    HR = hr_adj,
+    Group = paste(combinations$Temperature[i], combinations$SymbiontTreatment[i], combinations$Cross_2[i], sep = "°C ")
+  )
+}))
+
+# 3️⃣ Plot
+ggplot(df_hr, aes(x = Day, y = HR, color = Group)) +
+  geom_line(size = 1.2) +
+  labs(x = "Time (days)", y = "Hazard Ratio vs Ambient BxB C") +
+  theme_minimal() +
+  scale_color_brewer(palette = "Set1")
+
+
+
+
+
+
+
+# --- 1️⃣ Define time grid ---
+time_grid <- 1:22  # experiment duration in days
+
+# --- 2️⃣ Extract coefficients and variance-covariance matrix ---
+coefs <- coef(cox_td_3way)
+vcov_mat <- vcov(cox_td_3way)
+
+# --- 3️⃣ Define all combinations ---
+combinations <- expand.grid(
+  SymbiontTreatment = c("C", "D"),
+  Temperature = c("31", "35.5"),
+  Cross_2 = c("BxB", "TxT")
+)
+
+# --- 4️⃣ Function to compute HR(t) and 95% CI ---
+compute_hr_ci <- function(symbiont, temp, cross, coefs, vcov_mat, time_grid) {
+  
+  tt_term <- if(temp == "31") "tt(Treat31)" else "tt(Treat35.5)"
+  
+  # Build coefficient vector for this combination
+  coef_vec <- rep(0, length(coefs))
+  names(coef_vec) <- names(coefs)
+  
+  # Main time-dependent effect
+  coef_vec[tt_term] <- 1
+  
+  # Symbiont × tt
+  sym_tt <- paste0("SymbiontTreatmentD:", tt_term)
+  if(symbiont == "D" & sym_tt %in% names(coefs)) coef_vec[sym_tt] <- 1
+  
+  # Cross × tt
+  cross_tt <- paste0("Cross_2TxT:", tt_term)
+  if(cross == "TxT" & cross_tt %in% names(coefs)) coef_vec[cross_tt] <- 1
+  
+  # Three-way interaction
+  threeway <- paste0("SymbiontTreatmentD:Cross_2TxT:", tt_term)
+  if(symbiont == "D" & cross == "TxT" & threeway %in% names(coefs)) coef_vec[threeway] <- 1
+  
+  # Indices of used coefficients
+  idx <- which(coef_vec != 0)
+  
+  # Compute log(HR) for each time
+  log_hr <- sapply(time_grid, function(t) sum(coef_vec[idx] * log(t)))
+  
+  # Compute SE for each time point (delta method)
+  se_log_hr <- sapply(time_grid, function(t) sqrt(sum((log(t)^2) * diag(vcov_mat[idx, idx]))))
+  
+  # HR and 95% CI
+  data.frame(Day = time_grid,
+             HR = exp(log_hr),
+             Lower = exp(log_hr - 1.96 * se_log_hr),
+             Upper = exp(log_hr + 1.96 * se_log_hr))
+}
+
+
+# --- 5️⃣ Compute HR(t) + CIs for all combinations ---
+hr_ci_list <- lapply(1:nrow(combinations), function(i) {
+  df <- compute_hr_ci(
+    symbiont = combinations$SymbiontTreatment[i],
+    temp = combinations$Temperature[i],
+    cross = combinations$Cross_2[i],
+    coefs = coefs,
+    vcov_mat = vcov_mat,
+    time_grid = time_grid
+  )
+  df$Group <- paste(combinations$Temperature[i], combinations$SymbiontTreatment[i], combinations$Cross_2[i], sep = "°C ")
+  df
+})
+
+df_hr_ci <- do.call(rbind, hr_ci_list)
+
+# --- 6️⃣ Plot with ggplot2 ---
+library(ggplot2)
+
+ggplot(df_hr_ci, aes(x = Day, y = HR, color = Group, fill = Group)) +
+  geom_line(size = 1.2) +
+  geom_ribbon(aes(ymin = Lower, ymax = Upper), alpha = 0.2, color = NA) +
+  labs(x = "Time (days)", y = "Hazard Ratio vs Ambient") +
+  theme_minimal() +
+  scale_color_brewer(palette = "Set1") +
+  scale_fill_brewer(palette = "Set1")
+
 
 # Create a dataframe of p-values to include on the plots
 facet_pvals <- metadata_clean %>%
@@ -2652,8 +2968,10 @@ testDispersion(sim_res_beta)
 
 #7
 #This is the best --> final model
-#Can flag and report this in your methods/results as a treatment with high variance and model misfit, possibly due to near-complete mortality or low replicate counts.
 library(splines)
+library(glmmTMB)
+library(DHARMa)
+
 mod_betabin2 <- glmmTMB(Survived ~ symbiont * host * temperature + ns(as.numeric(timepoint), df = 4) + (1 | Replicate),
   family = betabinomial(link = "logit"),
   data = df_trimmed
@@ -2661,6 +2979,7 @@ mod_betabin2 <- glmmTMB(Survived ~ symbiont * host * temperature + ns(as.numeric
 sim_res_beta <- simulateResiduals(mod_betabin2)
 plot(sim_res_beta)
 testDispersion(sim_res_beta)
+summary(mod_betabin2)
 
 # Add residuals back to your dataset
 df_trimmed$DHARMa_resid <- residuals(sim_res_beta)
@@ -2775,12 +3094,12 @@ summary_contrasts_df <- summary_contrasts_df %>%
   separate(lhs, into = c("symbiont", "host", "temperature"), sep = " ")
 
 # Now you have symbiont, host, temperature columns
-print(summary_contrasts_df %>% select(contrast, symbiont, host, temperature, mean_control))
+print(summary_contrasts_df %>% dplyr::select(contrast, symbiont, host, temperature, mean_control))
 
 # Combine with EMMs for plotting
 emm_df <- as.data.frame(emm_simple) %>%
-  left_join(summary_contrasts_df %>% 
-              select(symbiont, host, temperature, mean_control, lower_control, 
+  dplyr::left_join(summary_contrasts_df %>% 
+              dplyr::select(symbiont, host, temperature, mean_control, lower_control, 
                      upper_control, signif_label, label_combined),
             by = c("symbiont", "host", "temperature"))
 
@@ -3040,6 +3359,11 @@ mega_heatmap_sig
 
 ggsave("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/mega_heatmap_control_contrast.png", plot = mega_heatmap_sig, width = 7, height = 5, dpi = 300)
 
+write.csv(
+  big_heatmap_df_log,
+  "C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/big_heatmap_df_log.csv",
+  row.names = FALSE
+)
 ```
 ### FINAL HEAT MAP
 ```{r}
@@ -3834,6 +4158,7 @@ model_full <- MCMCglmm(full_formula,
   thin = 20
 )
 
+summary(model_full)
 
 # Fit single fixed effect models
 mod_cells_treatment <- MCMCglmm(PercChangeCells ~ Treatment, 
@@ -4301,6 +4626,8 @@ model_full <- MCMCglmm(
   burnin = 10000,
   thin = 20
 )
+
+summary(model_full)
 
 # Fit single fixed effect models
 mod_size_treatment <- MCMCglmm(PercChangeSize ~ Treatment, 
@@ -5691,6 +6018,17 @@ plot1_perc <- ggplot(summary_stats,
   theme_classic()
 
 plot1_perc 
+
+#summary collapsing symbiont and host population
+summary_stats_means <- ipam_taxa_survived %>%
+  group_by(Timepoint, Treatment) %>%
+  summarise(
+    mean_pct = mean(PercentageWithCells, na.rm = TRUE),
+    se = sd(PercentageWithCells, na.rm = TRUE) / sqrt(sum(!is.na(PercentageWithCells))),
+    ci_lower = mean_pct - qt(0.975, df = sum(!is.na(PercentageWithCells)) - 1) * se,
+    ci_upper = mean_pct + qt(0.975, df = sum(!is.na(PercentageWithCells)) - 1) * se,
+    .groups = "drop"
+  )
 ```
 Combine PercentageWithCells and Cell Density
 ```{r}
@@ -5770,7 +6108,7 @@ plot_cells <- ggplot(summary_df_cells_grouped,
 
   theme_classic()
 
-
+plot_cells 
 
 # Combine plots using patchwork
 combined_plot <- plot1_perc / plot_cells  # Stack vertically
@@ -8282,3 +8620,402 @@ pairwise_diff_ts <- pairwise_diff_ts %>%
 
 head(pairwise_diff_ts)
 ```
+### Get CIs of Hazard Ratios ###
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# Time grid and model coefficients
+time_grid <- 1:22
+coefs <- coef(cox_td_3way)
+vcov_mat <- vcov(cox_td_3way)
+
+# Define all combination
+combinations <- expand.grid(
+  SymbiontTreatment = c("C", "D"),
+  Temperature = c("31", "35.5"),
+  Cross_2 = c("BxB", "TxT")
+)
+
+# Function to compute HR + 95% CI
+compute_hr_ci <- function(symbiont, temp, cross, coefs, vcov_mat, time_grid) {
+  
+  tt_term <- if(temp == "31") "tt(Treat31)" else "tt(Treat35.5)"
+  
+  coef_vec <- rep(0, length(coefs))
+  names(coef_vec) <- names(coefs)
+  
+  coef_vec[tt_term] <- 1
+  
+  sym_tt <- paste0("SymbiontTreatmentD:", tt_term)
+  if(symbiont == "D" & sym_tt %in% names(coefs)) coef_vec[sym_tt] <- 1
+  
+  cross_tt <- paste0("Cross_2TxT:", tt_term)
+  if(cross == "TxT" & cross_tt %in% names(coefs)) coef_vec[cross_tt] <- 1
+  
+  threeway <- paste0("SymbiontTreatmentD:Cross_2TxT:", tt_term)
+  if(symbiont == "D" & cross == "TxT" & threeway %in% names(coefs)) coef_vec[threeway] <- 1
+  
+  idx <- which(coef_vec != 0)
+  
+  log_hr <- sapply(time_grid, function(t) sum(coef_vec[idx] * log(t)))
+  se_log_hr <- sapply(time_grid, function(t) sqrt(sum((log(t)^2) * diag(vcov_mat[idx, idx]))))
+  
+  data.frame(
+    Day = time_grid,
+    HR = exp(log_hr),
+    Lower = exp(log_hr - 1.96 * se_log_hr),
+    Upper = exp(log_hr + 1.96 * se_log_hr)
+  )
+}
+
+# --- 4️⃣ Compute HR + CIs for all combinations ---
+df_hr_ci <- bind_rows(lapply(1:nrow(combinations), function(i) {
+  df <- compute_hr_ci(
+    symbiont = combinations$SymbiontTreatment[i],
+    temp = combinations$Temperature[i],
+    cross = combinations$Cross_2[i],
+    coefs = coefs,
+    vcov_mat = vcov_mat,
+    time_grid = time_grid
+  )
+  
+  # Find last observed death for this group
+ max_day <- max(metadata_clean$Timepoint[
+  as.character(metadata_clean$SymbiontTreatment) == combinations$SymbiontTreatment[i] &
+  as.character(metadata_clean$Treatment) == combinations$Temperature[i] &
+  as.character(metadata_clean$Cross_2) == combinations$Cross_2[i] &
+  metadata_clean$Status == 1
+])
+  
+  df <- df %>% filter(Day <= max_day)
+  df$Group <- paste(combinations$Temperature[i], combinations$SymbiontTreatment[i], combinations$Cross_2[i], sep = "°C ")
+  df
+}))
+
+# Remove rows corresponding to 35.5°C beyond day 6
+df_hr_ci_trim <- df_hr_ci[-c(51:66, 73:88, 139:154, 161:176), ]
+
+# --- 5️⃣ Plot ---
+ggplot(df_hr_ci_trim, aes(x = Day, y = HR, color = Group, fill = Group)) +
+  geom_line(size = 1.2) +
+  geom_ribbon(aes(ymin = Lower, ymax = Upper), alpha = 0.2, color = NA) +
+  labs(x = "Time (days)", y = "Hazard Ratio vs Ambient") +
+  theme_minimal() +
+  scale_color_brewer(palette = "Set1") +
+  scale_fill_brewer(palette = "Set1")
+
+# Recode 0% survival as Dead and ensure column is character
+metadata_clean_T6 <- metadata_clean %>%
+  mutate(
+    Alive..Dead..Sampled = as.character(Alive..Dead..Sampled),
+    Alive..Dead..Sampled = ifelse(Percent_Survival_atend == 0, "Dead", Alive..Dead..Sampled),
+    Alive..Dead..Sampled = ifelse(Alive..Dead..Sampled == "Alive", "Alive", "Dead")
+  )
+
+# Subset to 35.5°C and first 5 days
+subset_35 <- metadata_clean_T6 %>%
+  filter(Treatment == "35.5", Timepoint <= 5)
+
+# Summarize percent survival at each timepoint
+survival_timecourse <- subset_35 %>%
+  group_by(SymbiontTreatment, Cross_2, Timepoint) %>%
+  summarise(
+    n_total = n(),
+    n_alive = sum(Alive..Dead..Sampled == "Alive"),
+    survival_prop = n_alive / n_total
+  ) %>%
+  ungroup()
+
+survival_timecourse
+
+
+```
+
+### Experimental DHW Barplot ###
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# Site info
+sites <- data.frame(
+  Site = c("B", "T"),
+  SiteName = c("Bruboodjoo", "Tantabiddi"),
+  MMM = c(27, 28)
+)
+
+# Experimental temperatures
+exp_temps <- c(31, 35.5)
+days <- 1:22
+
+# Function to compute DHW at each day
+compute_dhw <- function(temp, mmm, day) {
+  anomaly <- temp - mmm
+  dhw <- ifelse(anomaly > 0, anomaly * (day/7), 0)
+  return(dhw)
+}
+
+# Create all combinations
+df_dhw <- expand.grid(
+  Site = sites$Site,
+  Temp = exp_temps,
+  Day = days
+) %>%
+  left_join(sites, by = "Site") %>%
+  rowwise() %>%
+  mutate(DHW = compute_dhw(Temp, MMM, Day)) %>%
+  ungroup() %>%
+  mutate(Label = paste(SiteName, "×", Temp, "°C"))
+
+df_dhw <- df_dhw %>%
+  mutate(
+    Site = recode(Site, "B" = "Bruboodjoo", "T" = "Tantabiddi"),
+    HotSpot = pmax(Temp - MMM, 0),  # HotSpot definition
+    Category = case_when(
+      HotSpot <= 0 ~ "No Stress",
+      HotSpot > 0 & HotSpot < 1 & DHW == 0 ~ "Bleaching Watch",
+      HotSpot >= 1 & DHW < 4 ~ "Bleaching Warning",
+      HotSpot >= 1 & DHW >= 4 & DHW < 8 ~ "Bleaching Alert Level 1",
+      HotSpot >= 1 & DHW >= 8 & DHW < 12 ~ "Bleaching Alert Level 2",
+      HotSpot >= 1 & DHW >= 12 & DHW < 16 ~ "Bleaching Alert Level 3",
+      HotSpot >= 1 & DHW >= 16 & DHW < 20 ~ "Bleaching Alert Level 4",
+      HotSpot >= 1 & DHW >= 20 ~ "Bleaching Alert Level 5",
+      TRUE ~ "Unclassified"
+    ),
+    # Force factor levels to match fill order
+    Category = factor(Category, levels = c(
+      "No Stress",
+      "Bleaching Watch",
+      "Bleaching Warning",
+      "Bleaching Alert Level 1",
+      "Bleaching Alert Level 2",
+      "Bleaching Alert Level 3",
+      "Bleaching Alert Level 4",
+      "Bleaching Alert Level 5"
+    ))
+  )
+
+df_final <- df_dhw %>%
+  filter(Day == max(Day))
+
+ggplot(df_dhw, aes(x = Day, y = DHW, fill = Category)) +
+  # facet-specific rectangle for 31 °C
+  geom_rect(data = df_dhw %>% filter(Temp == 31),
+            inherit.aes = FALSE,
+            aes(xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf),
+            color = "#fee08b", fill = NA, linewidth = 1.2) +
+  # facet-specific rectangle for 35.5 °C
+  geom_rect(data = df_dhw %>% filter(Temp == 35.5),
+            inherit.aes = FALSE,
+            aes(xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf),
+            color = "#d53e4f", fill = NA, linewidth = 1.2) +
+  geom_col(position = "dodge") +
+  facet_grid(Site ~ Temp) +
+  labs(x = "Days at Experimental Temperature",
+       y = "Degree Heating Weeks (DHW)",
+       fill = "NOAA Category") +
+  scale_fill_manual(values = c(
+    "No Stress" = "grey90",
+    "Bleaching Watch" = "#a6cee3",
+    "Bleaching Warning" = "#1f78b4",
+    "Bleaching Alert Level 1" = "#fee08b",
+    "Bleaching Alert Level 2" = "#f46d43",
+    "Bleaching Alert Level 3" = "#d73027",
+    "Bleaching Alert Level 4" = "#7f0000",
+    "Bleaching Alert Level 5" = "black"
+  ), drop = FALSE) +
+  theme_minimal(base_size = 14)
+
+ggsave("C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/DHW_plot.png", width = 8, height = 6, dpi = 300)
+```
+########## Summary figure #############
+Line graphs of all traits (means)
+```{r}
+
+###  Size  ###
+summary_df_size_grouped <- df_with_extremes %>%
+  mutate(
+    Reef = Cross_2,
+    DayNumber = Timepoint
+  ) %>%
+  group_by(DayNumber, Reef, SymbiontTreatment, Treatment) %>%
+  summarise(
+    mean_Area = mean(Area..mm.2., na.rm = TRUE),
+    sd_Area = sd(Area..mm.2., na.rm = TRUE),
+    n = n(),
+    se = sd_Area / sqrt(n),
+    ci_lower = mean_Area - qt(0.975, df = n - 1) * se,
+    ci_upper = mean_Area + qt(0.975, df = n - 1) * se,
+    .groups = "drop"
+  )
+
+summary_df_size_grouped <- summary_df_size_grouped %>%
+  mutate(DayNumber = as.numeric(as.character(DayNumber)))
+
+summary_df_size_filtered <- summary_df_size_grouped %>%
+  filter(DayNumber %in% c(1, 4, 7, 22))
+
+all_days <- sort(unique(summary_df_size_grouped$DayNumber))
+
+plot_size <- ggplot(summary_df_size_filtered, 
+                    aes(x = DayNumber, y = mean_Area)) +
+  geom_point(aes(fill = Reef, shape = SymbiontTreatment),
+             color = "black",  # black border
+             size = 3,
+             stroke = 0.8) +
+  geom_line(aes(color = Reef, group = interaction(Reef, SymbiontTreatment)),
+            size = 1) +
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper, 
+                    color = Reef, group = interaction(Reef, SymbiontTreatment)), 
+                width = 0.3) +
+  facet_wrap(~Treatment, ncol = 3) +
+  scale_fill_manual(values = c("BxB" = "#1f77b4", "TxT" = "#ff7f0e")) +
+  scale_color_manual(values = c("BxB" = "#1f77b4", "TxT" = "#ff7f0e")) +
+  scale_shape_manual(values = c("C" = 21, "D" = 24)) +
+  scale_x_continuous(breaks = all_days) +
+  labs(title = "Larval Size",
+       x = "Days",
+       y = "Mean Larval Size (mm^2)",
+       fill = "Population of Origin",
+       color = "Population of Origin",
+       shape = "Symbiont Type") +
+  theme_classic()
+
+
+plot_size
+plot_size <- plot_size +
+  scale_x_continuous(limits = c(0, 22), breaks = seq(0, 22, 2))
+
+
+###  Fv/Fm  ###
+summary_df_FvFm_grouped <- df_with_extremes %>%
+  mutate(
+    Reef = Cross_2,
+    DayNumber = Timepoint
+  ) %>%
+  group_by(DayNumber, Reef, SymbiontTreatment, Treatment) %>%
+  summarise(
+    mean_FvFm = mean(FvFm, na.rm = TRUE),
+    sd_FvFm = sd(FvFm, na.rm = TRUE),
+    n = n(),
+    se = sd_FvFm / sqrt(n),
+    ci_lower = mean_FvFm - qt(0.975, df = n - 1) * se,
+    ci_upper = mean_FvFm + qt(0.975, df = n - 1) * se,
+    .groups = "drop"
+  )
+
+summary_df_FvFm_grouped <- summary_df_FvFm_grouped %>%
+  mutate(DayNumber = as.numeric(as.character(DayNumber)))
+
+summary_df_FvFm_filtered <- summary_df_FvFm_grouped %>%
+  filter(DayNumber %in% c(1, 4, 22))
+
+all_days <- sort(unique(summary_df_FvFm_grouped$DayNumber))
+
+plot_FvFm <- ggplot(summary_df_FvFm_filtered, 
+                     aes(x = DayNumber, y = mean_FvFm)) +
+  # points with black border
+  geom_point(aes(fill = Reef, shape = SymbiontTreatment),
+             color = "black",
+             size = 3,
+             stroke = 0.8) +
+  # lines colored by Reef
+  geom_line(aes(color = Reef, group = interaction(Reef, SymbiontTreatment)),
+            size = 1) +
+  # error bars colored by Reef
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper,
+                    color = Reef, group = interaction(Reef, SymbiontTreatment)),
+                width = 0.3) +
+  facet_wrap(~Treatment, ncol = 3) +
+  scale_fill_manual(values = c("BxB" = "#1f77b4", "TxT" = "#ff7f0e")) +
+  scale_color_manual(values = c("BxB" = "#1f77b4", "TxT" = "#ff7f0e")) +
+  scale_shape_manual(values = c("C" = 21, "D" = 24)) +  # must match levels
+  scale_x_continuous(breaks = all_days) +
+  labs(title = "Fv/Fm",
+       x = "Days",
+       y = "Mean Fv/Fm",
+       fill = "Population of Origin",
+       color = "Population of Origin",
+       shape = "Symbiont Type") +
+  theme_classic()
+
+
+plot_FvFm
+plot_FvFm <- plot_FvFm +
+  scale_x_continuous(limits = c(0, 22), breaks = seq(0, 22, 2))
+
+
+###  Survival  ###
+summary_df_surv_grouped <- df_trimmed %>%
+  mutate(
+    Reef = Cross_2,
+    DayNumber = Timepoint
+  ) %>%
+  group_by(DayNumber, Reef, SymbiontTreatment, Treatment) %>%
+  summarise(
+    mean_surv = mean(Percent_Survival_atend, na.rm = TRUE),
+    sd_surv = sd(Percent_Survival_atend, na.rm = TRUE),
+    n = n(),
+    se = sd_surv / sqrt(n),
+    ci_lower = mean_surv - qt(0.975, df = n - 1) * se,
+    ci_upper = mean_surv + qt(0.975, df = n - 1) * se,
+    .groups = "drop"
+  )
+
+summary_df_surv_grouped <- summary_df_surv_grouped %>%
+  mutate(
+    DayNumber = as.numeric(as.character(DayNumber)),
+    Treatment = factor(Treatment, levels = c("Ambient", "31", "35.5"))
+  )
+
+
+summary_df_surv_filtered <- summary_df_surv_grouped %>%
+  filter(DayNumber %in% c(1, 4, 22))
+
+all_days <- sort(unique(summary_df_surv_grouped$DayNumber))
+
+plot_surv <- ggplot(summary_df_surv_filtered, 
+                    aes(x = DayNumber, y = mean_surv)) +
+  # points with black border
+  geom_point(aes(fill = Reef, shape = SymbiontTreatment),
+             color = "black",
+             size = 3,
+             stroke = 0.8) +
+  # lines colored by Reef
+  geom_line(aes(color = Reef, group = interaction(Reef, SymbiontTreatment)),
+            size = 1) +
+  # error bars colored by Reef
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper,
+                    color = Reef, group = interaction(Reef, SymbiontTreatment)),
+                width = 0.3) +
+  facet_wrap(~Treatment, ncol = 3) +
+  scale_fill_manual(values = c("BxB" = "#1f77b4", "TxT" = "#ff7f0e")) +
+  scale_color_manual(values = c("BxB" = "#1f77b4", "TxT" = "#ff7f0e")) +
+  scale_shape_manual(values = c("C" = 21, "D" = 24)) +  # must match SymbiontTreatment levels
+  scale_x_continuous(breaks = all_days) +
+  labs(title = "Survival",
+       x = "Days",
+       y = "Mean Survival",
+       fill = "Population of Origin",
+       color = "Population of Origin",
+       shape = "Symbiont Type") +
+  theme_classic()
+
+plot_surv
+plot_surv <- plot_surv +
+  scale_x_continuous(limits = c(0, 22), breaks = seq(0, 22, 2))
+
+
+# Combine plots using patchwork
+combined_mean_plots <- plot_surv / plot_cells / plot1_perc / plot_FvFm / plot_size  # Stack vertically
+# Alternatively, to place them side by side:
+# combined_plot <- plot1 + plot2
+
+# Display combined plot
+combined_mean_plots
+
+# Save the combined plot
+ggsave("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/combined_mean_plots_5_traits.png", plot = combined_mean_plots, width = 10, height = 15, dpi = 300)
+```
+
+
