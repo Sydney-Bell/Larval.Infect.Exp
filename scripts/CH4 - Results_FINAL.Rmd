@@ -370,6 +370,13 @@ ggplot(total_cells, aes(x = TubeID, y = Cells_End_Average, fill = CellType)) +
   geom_bar(stat = "identity") +
   labs(x = "Tube ID", y = "Total Number of Cells") +
   theme_minimal()
+
+avg_cells <- cells_long %>%
+  group_by(Treatment) %>%
+  summarise(mean_density = mean(CellDensity, na.rm = TRUE),
+            sd_density = sd(CellDensity, na.rm = TRUE),
+            n = n(),
+            se_density = sd_density / sqrt(n))
 ```
 ## Cell Density: Exploratory Line Graph
 ```{r}
@@ -1743,6 +1750,37 @@ ggplot(newdat.reef, aes(x = Treatment, y = Cross_2, fill = mean_control)) +
   labs(title = "Predicted Fv/Fm Change Relative to Control (Ambient × CC × C)",
        x = "Temperature", y = "Host Genotype")
 
+# 7. # Posterior predictions for each Treatment
+posterior_preds <- X %*% t(model3.reef$Sol)
+rownames(posterior_preds) <- newdat.reef$Treatment
+
+# All pairwise comparisons
+treatments <- levels(df_with_extremes$Treatment)
+pairwise_comparisons <- t(combn(treatments, 2))  # all unique pairs
+
+pairwise_results <- apply(pairwise_comparisons, 1, function(pair) {
+  t1 <- pair[1]
+  t2 <- pair[2]
+  diff <- posterior_preds[t2, ] - posterior_preds[t1, ]
+  
+  pMCMC <- 2 * min(mean(diff > 0), mean(diff < 0))
+  q <- quantile(diff, probs = c(0.025, 0.975))
+  
+  data.frame(
+    contrast = paste(t2, "–", t1),
+    mean_diff = mean(diff),
+    lower = q[1],
+    upper = q[2],
+    pMCMC = pMCMC,
+    signif = case_when(
+      pMCMC < 0.005 ~ "**",
+      pMCMC < 0.05  ~ "*",
+      TRUE          ~ ""
+    )
+  )
+})
+
+pairwise_results <- do.call(rbind, pairwise_results)
 
 #############################
 ### Modeling variables separate for each health metric to get relative contributions ###
@@ -2162,6 +2200,38 @@ ggplot(newdat_size_reef, aes(x = Treatment, y = Cross_2, fill = mean_control)) +
   labs(title = "Predicted Change in Size (%) Relative to Control (Ambient × CC × C)",
        x = "Treatment", y = "Host Genotype")
 
+# 7. # Posterior predictions for each Treatment
+pred_matrix_s <- X_s %*% t(mod.s.reef$Sol)
+rownames(pred_matrix_s) <- newdat_size_reef$Treatment
+
+# All pairwise comparisons
+treatments <- levels(df_with_extremes$Treatment)
+pairwise_comparisons <- t(combn(treatments, 2))  # all unique pairs
+
+pairwise_results <- apply(pairwise_comparisons, 1, function(pair) {
+  t1 <- pair[1]
+  t2 <- pair[2]
+  diff <- pred_matrix_s[t2, ] - pred_matrix_s[t1, ]
+  
+  pMCMC <- 2 * min(mean(diff > 0), mean(diff < 0))
+  q <- quantile(diff, probs = c(0.025, 0.975))
+  
+  data.frame(
+    contrast = paste(t2, "–", t1),
+    mean_diff = mean(diff),
+    lower = q[1],
+    upper = q[2],
+    pMCMC = pMCMC,
+    signif = case_when(
+      pMCMC < 0.005 ~ "**",
+      pMCMC < 0.05  ~ "*",
+      TRUE          ~ ""
+    )
+  )
+})
+
+pairwise_results <- do.call(rbind, pairwise_results)
+
 #############################
 ### Modeling variables separate for each health metric to get relative contributions ###
 #PercChangeSize ~ SymbiontTreatment * Cross_2 * Treatment
@@ -2550,6 +2620,37 @@ ggplot(newdat2_subset, aes(x = Treatment, y = Cross_2, fill = mean_control)) +
     x = "Treatment", y = "Host Genotype"
   )
 
+# 7. # Posterior predictions for each Treatment
+pred_matrix_subset <- X_subset %*% t(model_subset$Sol)
+rownames(pred_matrix_subset) <- newdat2_subset$Treatment
+
+# All pairwise comparisons
+treatments <- levels(df_subset$Treatment)
+pairwise_comparisons <- t(combn(treatments, 2))  # all unique pairs
+
+pairwise_results <- apply(pairwise_comparisons, 1, function(pair) {
+  t1 <- pair[1]
+  t2 <- pair[2]
+  diff <- pred_matrix_subset[t2, ] - pred_matrix_subset[t1, ]
+  
+  pMCMC <- 2 * min(mean(diff > 0), mean(diff < 0))
+  q <- quantile(diff, probs = c(0.025, 0.975))
+  
+  data.frame(
+    contrast = paste(t2, "–", t1),
+    mean_diff = mean(diff),
+    lower = q[1],
+    upper = q[2],
+    pMCMC = pMCMC,
+    signif = case_when(
+      pMCMC < 0.005 ~ "**",
+      pMCMC < 0.05  ~ "*",
+      TRUE          ~ ""
+    )
+  )
+})
+
+pairwise_results <- do.call(rbind, pairwise_results)
 
 #############################
 ### Modeling variables separate for each health metric to get relative contributions ###
@@ -2876,6 +2977,7 @@ library(MASS)
 library(nlme)
 library(emmeans)
 library(ggplot2)
+library(stringr)
 
 # Step 1: Prepare long-format dataset
 df_long <- df_Surv %>%
@@ -3123,6 +3225,36 @@ ggplot(emm_df, aes(x = temperature, y = host, fill = emmean)) +
        title = "Predicted Survival vs Control (Ambient × BxB × C)") +
   theme_minimal()
 
+# 5. Get estimated marginal means for each Treatment
+# Average across symbiont and host to get treatment-level means
+emm_treatment <- emmeans(mod_betabin2, ~ temperature, 
+                         weights = "proportional",   # marginalize over symbiont and host
+                         type = "response")          # back-transform to probability scale
+
+# Pairwise contrasts among temperatures
+pairwise_treatment <- pairs(emm_treatment, adjust = "tukey")  # 31 vs Ambient, 35.5 vs Ambient, 35.5 vs 31
+
+# Convert to dataframe for plotting or table
+pairwise_treatment_df <- as.data.frame(pairwise_treatment) %>%
+  mutate(
+    signif_label = case_when(
+      p.value < 0.005 ~ "**",
+      p.value < 0.05  ~ "*",
+      TRUE            ~ ""
+    ),
+    label_combined = paste0(round(odds.ratio, 2), signif_label)
+  )
+
+# Estimated marginal means for each treatment
+emm_treatment_df <- as.data.frame(emm_treatment) %>%
+  mutate(
+    temperature = factor(temperature, levels = c("Ambient", "31", "35.5"))
+  )
+
+# View results
+emm_treatment_df        # mean survival ± SE or CI for each temperature
+pairwise_treatment_df   # all pairwise contrasts and significance
+
 
 # Option 1: Using sjstats
 install.packages("sjstats")
@@ -3364,6 +3496,105 @@ write.csv(
   "C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/big_heatmap_df_log.csv",
   row.names = FALSE
 )
+
+big_heatmap_df_log_scaled2 <- big_heatmap_df_log %>%
+  # Identify significance
+  mutate(
+    sig_stars = ifelse(Trait == "Survival", signif_label, signif_label_control),
+    significant = str_detect(sig_stars, "\\*")  # TRUE if * or **
+  ) %>%
+  # Only significant cells get colored using the original fold-change
+  mutate(fold_change_color = ifelse(significant, mean_control_sign, NA)) %>%
+  # Round fold change and append significance stars for all cells
+  mutate(
+    rounded_value = round(mean_control_sign, 2),
+    label_fc = paste0(rounded_value, sig_stars)
+  ) %>%
+  # Force control cells to 0 with no stars
+  mutate(
+    label_fc = ifelse(
+      Treatment == "Ambient" & Cross_2 == "CC" & SymbiontTreatment == "C",
+      "0",
+      label_fc
+    ),
+    fold_change_color = ifelse(
+      Treatment == "Ambient" & Cross_2 == "CC" & SymbiontTreatment == "C",
+      0,
+      fold_change_color
+    )
+  )
+
+
+
+mega_heatmap_sig_values <- ggplot(big_heatmap_df_log_scaled2, aes(x = Treatment_Symbiont, y = Cross_2)) +
+  geom_tile(aes(fill = fold_change_color), color = "black") +
+  geom_text(aes(label = label_fc), color = "black", size = 3) +
+  facet_grid(Trait ~ .) +
+  scale_fill_gradient2(
+    name = "Fold Change",
+    low = "#3288bd",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    na.value = "white"
+  ) +
+  theme_minimal(base_size = 10) +
+  labs(
+    title = "Significant Trait Responses by Treatment and Symbiont",
+    x = "Temperature",
+    y = "Population of Origin"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "right"
+  )
+
+mega_heatmap_sig_values
+
+ggsave("C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/heatmap.png", plot = mega_heatmap_sig_values, width = 6, height = 8, dpi = 300)
+
+
+big_heatmap_sig_only <- big_heatmap_df_log_scaled2 %>%
+  # Create a label that only shows * or ** for significant cells
+  mutate(
+    label_stars_only = ifelse(significant, sig_stars, "")
+  )
+
+# Set Trait as a factor with desired order
+big_heatmap_sig_only <- big_heatmap_sig_only %>%
+  mutate(Trait = factor(Trait, levels = c(
+    "Survival",
+    "Cell Density",
+    "Acquisition",
+    "Fv/Fm",
+    "Larval Size"
+  )))
+
+
+heatmap_stars<- ggplot(big_heatmap_sig_only, aes(x = Treatment_Symbiont, y = Cross_2)) +
+  geom_tile(aes(fill = fold_change_color), color = "black") +  # keep coloring for significant cells
+  geom_text(aes(label = label_stars_only), color = "black", size = 4) +  # only stars inside cells
+  facet_grid(Trait ~ .) +
+  scale_fill_gradient2(
+    name = "Fold Change",
+    low = "#3288bd",
+    mid = "white",
+    high = "red",
+    midpoint = 0,
+    na.value = "white"  # non-significant cells stay white
+  ) +
+  theme_minimal(base_size = 10) +
+  labs(
+    title = "Significant Trait Responses (Stars Only)",
+    x = "Temperature",
+    y = "Population of Origin"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "right"
+  )
+
+ggsave("C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/heatmap_stars.png", plot = heatmap_stars, width = 5, height = 5, dpi = 300)
 ```
 ### FINAL HEAT MAP
 ```{r}
@@ -5818,7 +6049,7 @@ ipam <- ipam %>%
 
 #Calculate the percentage of larvae with cells per vial for summary plot. Assuming that FvFm > 0 indicates larvae with cells:
 summary_df <- ipam %>%
-  group_by(TIMEPOINT, TREATMENT) %>%
+  group_by(Timepoint, TREATMENT) %>%
   summarize(PercentageWithCells = mean(FvFm > 0, na.rm = TRUE) * 100)
 
 #create figure
@@ -5947,7 +6178,7 @@ ipam_taxa_survived <- ipam_taxa_survived %>%
 
 # Then summarize including Cross instead of ReefMom
 summary_stats <- ipam_taxa_survived %>%
-  group_by(Timepoint, SymbiontTreatment, Treatment, Cross) %>%
+  group_by(Timepoint, SymbiontTreatment, Treatment) %>%
   summarise(
     mean_pct = mean(PercentageWithCells, na.rm = TRUE),
     se = sd(PercentageWithCells, na.rm = TRUE) / sqrt(sum(!is.na(PercentageWithCells))),
@@ -7746,17 +7977,19 @@ library(dplyr)
 
 ipam <- ipam %>%
   mutate(
+    TEMP_num = as.numeric(as.character(TEMP)),  # convert TEMP to numeric safely
     TEMP = case_when(
-      near(TEMP, 27.5) ~ "Ambient",
-      near(TEMP, 31) ~ "31",
-      near(TEMP, 35.5) ~ "35.5",
-      TRUE ~ as.character(TEMP)
+      near(TEMP_num, 27.5) ~ "Ambient",
+      near(TEMP_num, 31)   ~ "31",
+      near(TEMP_num, 35.5) ~ "35.5",
+      TRUE ~ as.character(TEMP_num)
     ),
     Reef = recode(Reef, "Bruboodjoo" = "CC", "Tantabiddi" = "WW"),
     SymbiontTreatment = factor(zoox, levels = c("C", "D")),
     Treatment = factor(TEMP, levels = c("Ambient", "31", "35.5")),
     Cross = factor(Reef, levels = c("CC", "WW"))
-  )
+  ) %>%
+  dplyr::select(-TEMP_num)  # optional: remove temporary numeric column
 
 #df_subset$logChangeCells <- log(df_subset$PercChangeCells + 1)
 
@@ -7885,6 +8118,82 @@ ggplot(newdat_perc, aes(x = Treatment, y = Cross, fill = mean_control)) +
   labs(title = "Predicted Change in Cell Density (No 35.5)",
        x = "Treatment", y = "Host Genotype")
 
+# 7. Posterior predictions for each Treatment
+pred_matrix_subset <- X_s %*% t(model_perc$Sol)
+rownames(pred_matrix_subset) <- newdat_perc$Treatment
+
+# All pairwise comparisons
+treatments <- levels(ipam$Treatment)
+pairwise_comparisons <- t(combn(treatments, 2))  # all unique pairs
+
+pairwise_results <- apply(pairwise_comparisons, 1, function(pair) {
+  t1 <- pair[1]
+  t2 <- pair[2]
+  diff <- pred_matrix_subset[t2, ] - pred_matrix_subset[t1, ]
+  
+  pMCMC <- 2 * min(mean(diff > 0), mean(diff < 0))
+  q <- quantile(diff, probs = c(0.025, 0.975))
+  
+  data.frame(
+    contrast = paste(t2, "–", t1),
+    mean_diff = mean(diff),
+    lower = q[1],
+    upper = q[2],
+    pMCMC = pMCMC,
+    signif = case_when(
+      pMCMC < 0.005 ~ "**",
+      pMCMC < 0.05  ~ "*",
+      TRUE          ~ ""
+    )
+  )
+})
+
+pairwise_results <- do.call(rbind, pairwise_results)
+
+# 8. Now just restrict to T1-T4
+ipam_subset <- ipam %>%
+  filter(Timepoint >= 1 & Timepoint <= 4)
+
+model_perc <- MCMCglmm(
+  PercChangeCells ~ SymbiontTreatment * Cross * Treatment,
+  random = ~ Replicate,
+  data = ipam_subset,
+  family = "gaussian",
+  prior = prior,
+  nitt = 50000,
+  burnin = 10000,
+  thin = 20
+)
+pred_matrix_subset <- X_s %*% t(model_perc$Sol)
+rownames(pred_matrix_subset) <- newdat_perc$Treatment
+
+# All pairwise comparisons
+treatments <- levels(ipam$Treatment)
+pairwise_comparisons <- t(combn(treatments, 2))  # all unique pairs
+
+pairwise_results <- apply(pairwise_comparisons, 1, function(pair) {
+  t1 <- pair[1]
+  t2 <- pair[2]
+  diff <- pred_matrix_subset[t2, ] - pred_matrix_subset[t1, ]
+  
+  pMCMC <- 2 * min(mean(diff > 0), mean(diff < 0))
+  q <- quantile(diff, probs = c(0.025, 0.975))
+  
+  data.frame(
+    contrast = paste(t2, "–", t1),
+    mean_diff = mean(diff),
+    lower = q[1],
+    upper = q[2],
+    pMCMC = pMCMC,
+    signif = case_when(
+      pMCMC < 0.005 ~ "**",
+      pMCMC < 0.05  ~ "*",
+      TRUE          ~ ""
+    )
+  )
+})
+
+pairwise_results <- do.call(rbind, pairwise_results)
 
 #############################
 ### Modeling variables separate for each health metric to get relative contributions ###
@@ -8838,7 +9147,7 @@ summary_df_size_grouped <- df_with_extremes %>%
     Reef = Cross_2,
     DayNumber = Timepoint
   ) %>%
-  group_by(DayNumber, Reef, SymbiontTreatment, Treatment) %>%
+  group_by(DayNumber, SymbiontTreatment) %>%
   summarise(
     mean_Area = mean(Area..mm.2., na.rm = TRUE),
     sd_Area = sd(Area..mm.2., na.rm = TRUE),
@@ -8893,7 +9202,7 @@ summary_df_FvFm_grouped <- df_with_extremes %>%
     Reef = Cross_2,
     DayNumber = Timepoint
   ) %>%
-  group_by(DayNumber, Reef, SymbiontTreatment, Treatment) %>%
+  group_by(DayNumber, Reef) %>%
   summarise(
     mean_FvFm = mean(FvFm, na.rm = TRUE),
     sd_FvFm = sd(FvFm, na.rm = TRUE),

@@ -1,0 +1,9 @@
+"Component","Adj_R2","F_stat","df_num","df_den","p_value","n"
+"Unique Symbiont",0,0.64285926616913,1,45,0.416,49
+"Unique Cross",0.0201583147146013,1.9420764054534,1,45,0.177,49
+"Unique Treatment",0.00664628136531376,1.31060656344111,1,45,0.265,49
+"Shared Symbiont/Cross",0.00295908186953053,NA,NA,NA,NA,49
+"Shared Symbiont/Treatment",0,NA,NA,NA,NA,49
+"Shared Cross/Treatment",0,NA,NA,NA,NA,49
+"Shared All",0,NA,NA,NA,NA,49
+"Residual",0.98429646629923,NA,NA,NA,NA,49
