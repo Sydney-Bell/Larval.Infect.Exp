@@ -1750,37 +1750,159 @@ ggplot(newdat.reef, aes(x = Treatment, y = Cross_2, fill = mean_control)) +
   labs(title = "Predicted Fv/Fm Change Relative to Control (Ambient × CC × C)",
        x = "Temperature", y = "Host Genotype")
 
-# 7. # Posterior predictions for each Treatment
+# 7. # Posterior predictions for marginal temperature effects
+# 1. Compute posterior predictions for all combinations
 posterior_preds <- X %*% t(model3.reef$Sol)
-rownames(posterior_preds) <- newdat.reef$Treatment
 
-# All pairwise comparisons
-treatments <- levels(df_with_extremes$Treatment)
-pairwise_comparisons <- t(combn(treatments, 2))  # all unique pairs
+# Identify unique temperatures
+temp_levels <- levels(df_with_extremes$Treatment)
 
-pairwise_results <- apply(pairwise_comparisons, 1, function(pair) {
-  t1 <- pair[1]
-  t2 <- pair[2]
-  diff <- posterior_preds[t2, ] - posterior_preds[t1, ]
+# 2. Function to extract all posterior samples for a given temperature (all Symbiont × Cross)
+get_post_samples <- function(temp, posterior_matrix, newdat) {
+  rows <- which(newdat$Treatment == temp)
+  posterior_matrix[rows, , drop = FALSE]  # keep full posterior for all rows
+}
+
+# 3. Compute marginal posterior summaries (mean + 95% CI)
+marginal_summary <- data.frame(
+  Temperature = temp_levels,
+  post_mean = sapply(temp_levels, function(temp) mean(as.vector(get_post_samples(temp, posterior_preds, newdat.reef)))),
+  lower_CI  = sapply(temp_levels, function(temp) quantile(as.vector(get_post_samples(temp, posterior_preds, newdat.reef)), probs = 0.025)),
+  upper_CI  = sapply(temp_levels, function(temp) quantile(as.vector(get_post_samples(temp, posterior_preds, newdat.reef)), probs = 0.975))
+)
+
+# 4. Function to compute full posterior-based pMCMC for comparison vs reference
+pMCMC_vs_ref <- function(temp, ref = temp_levels[1], posterior_matrix, newdat) {
+  post_temp <- as.vector(get_post_samples(temp, posterior_matrix, newdat))
+  post_ref  <- as.vector(get_post_samples(ref, posterior_matrix, newdat))
   
-  pMCMC <- 2 * min(mean(diff > 0), mean(diff < 0))
-  q <- quantile(diff, probs = c(0.025, 0.975))
-  
-  data.frame(
-    contrast = paste(t2, "–", t1),
-    mean_diff = mean(diff),
-    lower = q[1],
-    upper = q[2],
-    pMCMC = pMCMC,
-    signif = case_when(
-      pMCMC < 0.005 ~ "**",
-      pMCMC < 0.05  ~ "*",
-      TRUE          ~ ""
-    )
-  )
+  diff <- post_temp - post_ref
+  2 * min(mean(diff > 0), mean(diff < 0))  # two-sided pMCMC
+}
+
+# 5. Compute pMCMC for each temperature vs 27.5°C
+marginal_summary$pMCMC_vs_27.5 <- sapply(temp_levels, function(temp) {
+  if(temp == temp_levels[1]) return(NA)  # reference vs itself
+  pMCMC_vs_ref(temp, ref = temp_levels[1], posterior_matrix = posterior_preds, newdat = newdat.reef)
 })
 
-pairwise_results <- do.call(rbind, pairwise_results)
+# 6. Add significance labels
+marginal_summary$signif <- case_when(
+  marginal_summary$pMCMC_vs_27.5 < 0.005 ~ "**",
+  marginal_summary$pMCMC_vs_27.5 < 0.05  ~ "*",
+  TRUE                                   ~ ""
+)
+
+# 7. Ensure full precision is kept
+options(digits = 8)
+
+# 8. View results
+marginal_summary
+
+# 7b. Posterior predictions for marginal SymbiontTreatment effects
+# 1. Compute posterior predictions for all combinations (already done)
+posterior_preds <- X %*% t(model3.reef$Sol)
+
+# Identify unique SymbiontTreatment levels
+sym_levels <- levels(df_with_extremes$SymbiontTreatment)
+
+# 2. Function to extract all posterior samples for a given SymbiontTreatment
+get_post_samples_sym <- function(sym, posterior_matrix, newdat) {
+  rows <- which(newdat$SymbiontTreatment == sym)
+  posterior_matrix[rows, , drop = FALSE]  # keep full posterior for all rows
+}
+
+# 3. Compute marginal posterior summaries (mean + 95% CI)
+marginal_sym_summary <- data.frame(
+  SymbiontTreatment = sym_levels,
+  post_mean = sapply(sym_levels, function(sym) mean(as.vector(get_post_samples_sym(sym, posterior_preds, newdat.reef)))),
+  lower_CI  = sapply(sym_levels, function(sym) quantile(as.vector(get_post_samples_sym(sym, posterior_preds, newdat.reef)), probs = 0.025)),
+  upper_CI  = sapply(sym_levels, function(sym) quantile(as.vector(get_post_samples_sym(sym, posterior_preds, newdat.reef)), probs = 0.975))
+)
+
+# 4. Function to compute full posterior-based pMCMC vs reference SymbiontTreatment
+pMCMC_vs_ref_sym <- function(sym, ref = sym_levels[1], posterior_matrix, newdat) {
+  post_sym <- as.vector(get_post_samples_sym(sym, posterior_matrix, newdat))
+  post_ref <- as.vector(get_post_samples_sym(ref, posterior_matrix, newdat))
+  
+  diff <- post_sym - post_ref
+  2 * min(mean(diff > 0), mean(diff < 0))  # two-sided pMCMC
+}
+
+# 5. Compute pMCMC for each SymbiontTreatment vs reference
+marginal_sym_summary$pMCMC_vs_ref <- sapply(sym_levels, function(sym) {
+  if(sym == sym_levels[1]) return(NA)  # reference vs itself
+  pMCMC_vs_ref_sym(sym, ref = sym_levels[1], posterior_matrix = posterior_preds, newdat = newdat.reef)
+})
+
+# 6. Add significance labels
+marginal_sym_summary$signif <- case_when(
+  marginal_sym_summary$pMCMC_vs_ref < 0.005 ~ "**",
+  marginal_sym_summary$pMCMC_vs_ref < 0.05  ~ "*",
+  TRUE                                      ~ ""
+)
+
+# 7. View results
+marginal_sym_summary
+
+# 7c. Posterior predictions for marginal Cross_2 (Population) effects
+# 1. posterior_preds already computed:
+# posterior_preds <- X %*% t(model3.reef$Sol)
+
+# Identify unique population levels
+pop_levels <- levels(df_with_extremes$Cross_2)
+
+# 2. Function to extract posterior draws for a given population
+get_post_samples_pop <- function(pop, posterior_matrix, newdat) {
+  rows <- which(newdat$Cross_2 == pop)
+  posterior_matrix[rows, , drop = FALSE]
+}
+
+# 3. Marginal posterior summaries (mean + 95% CI)
+marginal_pop_summary <- data.frame(
+  Cross_2 = pop_levels,
+  post_mean = sapply(pop_levels, function(pop)
+    mean(as.vector(get_post_samples_pop(pop, posterior_preds, newdat.reef)))
+  ),
+  lower_CI = sapply(pop_levels, function(pop)
+    quantile(as.vector(get_post_samples_pop(pop, posterior_preds, newdat.reef)),
+             probs = 0.025)
+  ),
+  upper_CI = sapply(pop_levels, function(pop)
+    quantile(as.vector(get_post_samples_pop(pop, posterior_preds, newdat.reef)),
+             probs = 0.975)
+  )
+)
+
+# 4. Posterior-based pMCMC for contrasts vs reference population
+pMCMC_vs_ref_pop <- function(pop, ref = pop_levels[1], posterior_matrix, newdat) {
+  post_pop <- as.vector(get_post_samples_pop(pop, posterior_matrix, newdat))
+  post_ref <- as.vector(get_post_samples_pop(ref, posterior_matrix, newdat))
+  
+  diff <- post_pop - post_ref
+  2 * min(mean(diff > 0), mean(diff < 0))  # two-sided
+}
+
+# 5. Compute pMCMC for each vs reference
+marginal_pop_summary$pMCMC_vs_ref <- sapply(pop_levels, function(pop) {
+  if(pop == pop_levels[1]) return(NA)
+  pMCMC_vs_ref_pop(pop, ref = pop_levels[1],
+                   posterior_matrix = posterior_preds, newdat = newdat.reef)
+})
+
+# 6. Add simple significance labels
+marginal_pop_summary$signif <- case_when(
+  marginal_pop_summary$pMCMC_vs_ref < 0.005 ~ "**",
+  marginal_pop_summary$pMCMC_vs_ref < 0.05  ~ "*",
+  TRUE                                      ~ ""
+)
+
+# Optional precision
+options(digits = 8)
+
+# 7. View results
+marginal_pop_summary
+
 
 #############################
 ### Modeling variables separate for each health metric to get relative contributions ###
@@ -2200,37 +2322,160 @@ ggplot(newdat_size_reef, aes(x = Treatment, y = Cross_2, fill = mean_control)) +
   labs(title = "Predicted Change in Size (%) Relative to Control (Ambient × CC × C)",
        x = "Treatment", y = "Host Genotype")
 
-# 7. # Posterior predictions for each Treatment
-pred_matrix_s <- X_s %*% t(mod.s.reef$Sol)
-rownames(pred_matrix_s) <- newdat_size_reef$Treatment
+# 7. # Posterior predictions for marginal temperature effects
+# 1. Compute posterior predictions for all combinations
+posterior_preds <- X_s %*% t(mod.s.reef$Sol)
 
-# All pairwise comparisons
-treatments <- levels(df_with_extremes$Treatment)
-pairwise_comparisons <- t(combn(treatments, 2))  # all unique pairs
+# Identify unique temperatures
+temp_levels <- levels(df_with_extremes$Treatment)
 
-pairwise_results <- apply(pairwise_comparisons, 1, function(pair) {
-  t1 <- pair[1]
-  t2 <- pair[2]
-  diff <- pred_matrix_s[t2, ] - pred_matrix_s[t1, ]
+# 2. Function to extract all posterior samples for a given temperature (all Symbiont × Cross)
+get_post_samples <- function(temp, posterior_matrix, newdat) {
+  rows <- which(newdat$Treatment == temp)
+  posterior_matrix[rows, , drop = FALSE]  # keep full posterior for all rows
+}
+
+# 3. Compute marginal posterior summaries (mean + 95% CI)
+marginal_summary <- data.frame(
+  Temperature = temp_levels,
+  post_mean = sapply(temp_levels, function(temp) mean(as.vector(get_post_samples(temp, posterior_preds, newdat_size_reef)))),
+  lower_CI  = sapply(temp_levels, function(temp) quantile(as.vector(get_post_samples(temp, posterior_preds, newdat_size_reef)), probs = 0.025)),
+  upper_CI  = sapply(temp_levels, function(temp) quantile(as.vector(get_post_samples(temp, posterior_preds, newdat_size_reef)), probs = 0.975))
+)
+
+# 4. Function to compute full posterior-based pMCMC for comparison vs reference
+pMCMC_vs_ref <- function(temp, ref = temp_levels[1], posterior_matrix, newdat) {
+  post_temp <- as.vector(get_post_samples(temp, posterior_matrix, newdat))
+  post_ref  <- as.vector(get_post_samples(ref, posterior_matrix, newdat))
   
-  pMCMC <- 2 * min(mean(diff > 0), mean(diff < 0))
-  q <- quantile(diff, probs = c(0.025, 0.975))
-  
-  data.frame(
-    contrast = paste(t2, "–", t1),
-    mean_diff = mean(diff),
-    lower = q[1],
-    upper = q[2],
-    pMCMC = pMCMC,
-    signif = case_when(
-      pMCMC < 0.005 ~ "**",
-      pMCMC < 0.05  ~ "*",
-      TRUE          ~ ""
-    )
-  )
+  diff <- post_temp - post_ref
+  2 * min(mean(diff > 0), mean(diff < 0))  # two-sided pMCMC
+}
+
+# 5. Compute pMCMC for each temperature vs 27.5°C
+marginal_summary$pMCMC_vs_27.5 <- sapply(temp_levels, function(temp) {
+  if(temp == temp_levels[1]) return(NA)  # reference vs itself
+  pMCMC_vs_ref(temp, ref = temp_levels[1], posterior_matrix = posterior_preds, newdat = newdat_size_reef)
 })
 
-pairwise_results <- do.call(rbind, pairwise_results)
+# 6. Add significance labels
+marginal_summary$signif <- case_when(
+  marginal_summary$pMCMC_vs_27.5 < 0.005 ~ "**",
+  marginal_summary$pMCMC_vs_27.5 < 0.05  ~ "*",
+  TRUE                                   ~ ""
+)
+
+# 7. Ensure full precision is kept
+options(digits = 8)
+
+# 8. View results
+marginal_summary
+
+# 7b. Posterior predictions for marginal SymbiontTreatment effects
+# 1. Compute posterior predictions for all combinations (already done)
+#posterior_preds <- X_s %*% t(mod.s.reef$Sol)
+
+# Identify unique SymbiontTreatment levels
+sym_levels <- levels(df_with_extremes$SymbiontTreatment)
+
+# 2. Function to extract all posterior samples for a given SymbiontTreatment
+get_post_samples_sym <- function(sym, posterior_matrix, newdat) {
+  rows <- which(newdat$SymbiontTreatment == sym)
+  posterior_matrix[rows, , drop = FALSE]  # keep full posterior for all rows
+}
+
+# 3. Compute marginal posterior summaries (mean + 95% CI)
+marginal_sym_summary <- data.frame(
+  SymbiontTreatment = sym_levels,
+  post_mean = sapply(sym_levels, function(sym) mean(as.vector(get_post_samples_sym(sym, posterior_preds, newdat_size_reef)))),
+  lower_CI  = sapply(sym_levels, function(sym) quantile(as.vector(get_post_samples_sym(sym, posterior_preds, newdat_size_reef)), probs = 0.025)),
+  upper_CI  = sapply(sym_levels, function(sym) quantile(as.vector(get_post_samples_sym(sym, posterior_preds, newdat_size_reef)), probs = 0.975))
+)
+
+# 4. Function to compute full posterior-based pMCMC vs reference SymbiontTreatment
+pMCMC_vs_ref_sym <- function(sym, ref = sym_levels[1], posterior_matrix, newdat) {
+  post_sym <- as.vector(get_post_samples_sym(sym, posterior_matrix, newdat))
+  post_ref <- as.vector(get_post_samples_sym(ref, posterior_matrix, newdat))
+  
+  diff <- post_sym - post_ref
+  2 * min(mean(diff > 0), mean(diff < 0))  # two-sided pMCMC
+}
+
+# 5. Compute pMCMC for each SymbiontTreatment vs reference
+marginal_sym_summary$pMCMC_vs_ref <- sapply(sym_levels, function(sym) {
+  if(sym == sym_levels[1]) return(NA)  # reference vs itself
+  pMCMC_vs_ref_sym(sym, ref = sym_levels[1], posterior_matrix = posterior_preds, newdat = newdat_size_reef)
+})
+
+# 6. Add significance labels
+marginal_sym_summary$signif <- case_when(
+  marginal_sym_summary$pMCMC_vs_ref < 0.005 ~ "**",
+  marginal_sym_summary$pMCMC_vs_ref < 0.05  ~ "*",
+  TRUE                                      ~ ""
+)
+
+# 7. View results
+marginal_sym_summary
+
+# 7c. Posterior predictions for marginal Cross_2 (Population) effects
+# 1. posterior_preds already computed:
+# posterior_preds <- X %*% t(model3.reef$Sol)
+
+# Identify unique population levels
+pop_levels <- levels(df_with_extremes$Cross_2)
+
+# 2. Function to extract posterior draws for a given population
+get_post_samples_pop <- function(pop, posterior_matrix, newdat) {
+  rows <- which(newdat$Cross_2 == pop)
+  posterior_matrix[rows, , drop = FALSE]
+}
+
+# 3. Marginal posterior summaries (mean + 95% CI)
+marginal_pop_summary <- data.frame(
+  Cross_2 = pop_levels,
+  post_mean = sapply(pop_levels, function(pop)
+    mean(as.vector(get_post_samples_pop(pop, posterior_preds, newdat_size_reef)))
+  ),
+  lower_CI = sapply(pop_levels, function(pop)
+    quantile(as.vector(get_post_samples_pop(pop, posterior_preds, newdat_size_reef)),
+             probs = 0.025)
+  ),
+  upper_CI = sapply(pop_levels, function(pop)
+    quantile(as.vector(get_post_samples_pop(pop, posterior_preds, newdat_size_reef)),
+             probs = 0.975)
+  )
+)
+
+# 4. Posterior-based pMCMC for contrasts vs reference population
+pMCMC_vs_ref_pop <- function(pop, ref = pop_levels[1], posterior_matrix, newdat) {
+  post_pop <- as.vector(get_post_samples_pop(pop, posterior_matrix, newdat))
+  post_ref <- as.vector(get_post_samples_pop(ref, posterior_matrix, newdat))
+  
+  diff <- post_pop - post_ref
+  2 * min(mean(diff > 0), mean(diff < 0))  # two-sided
+}
+
+# 5. Compute pMCMC for each vs reference
+marginal_pop_summary$pMCMC_vs_ref <- sapply(pop_levels, function(pop) {
+  if(pop == pop_levels[1]) return(NA)
+  pMCMC_vs_ref_pop(pop, ref = pop_levels[1],
+                   posterior_matrix = posterior_preds, newdat = newdat_size_reef)
+})
+
+# 6. Add simple significance labels
+marginal_pop_summary$signif <- case_when(
+  marginal_pop_summary$pMCMC_vs_ref < 0.005 ~ "**",
+  marginal_pop_summary$pMCMC_vs_ref < 0.05  ~ "*",
+  TRUE                                      ~ ""
+)
+
+# Optional precision
+options(digits = 8)
+
+# 7. View results
+marginal_pop_summary
+
+
 
 #############################
 ### Modeling variables separate for each health metric to get relative contributions ###
@@ -2620,37 +2865,160 @@ ggplot(newdat2_subset, aes(x = Treatment, y = Cross_2, fill = mean_control)) +
     x = "Treatment", y = "Host Genotype"
   )
 
-# 7. # Posterior predictions for each Treatment
-pred_matrix_subset <- X_subset %*% t(model_subset$Sol)
-rownames(pred_matrix_subset) <- newdat2_subset$Treatment
+# 7. # Posterior predictions for marginal temperature effects
+# 1. Compute posterior predictions for all combinations
+posterior_preds <- X_subset %*% t(model_subset$Sol)
 
-# All pairwise comparisons
-treatments <- levels(df_subset$Treatment)
-pairwise_comparisons <- t(combn(treatments, 2))  # all unique pairs
+# Identify unique temperatures
+temp_levels <- levels(totaldf_long$Treatment)
 
-pairwise_results <- apply(pairwise_comparisons, 1, function(pair) {
-  t1 <- pair[1]
-  t2 <- pair[2]
-  diff <- pred_matrix_subset[t2, ] - pred_matrix_subset[t1, ]
+# 2. Function to extract all posterior samples for a given temperature (all Symbiont × Cross)
+get_post_samples <- function(temp, posterior_matrix, newdat) {
+  rows <- which(newdat$Treatment == temp)
+  posterior_matrix[rows, , drop = FALSE]  # keep full posterior for all rows
+}
+
+# 3. Compute marginal posterior summaries (mean + 95% CI)
+marginal_summary <- data.frame(
+  Temperature = temp_levels,
+  post_mean = sapply(temp_levels, function(temp) mean(as.vector(get_post_samples(temp, posterior_preds, newdat2_subset)))),
+  lower_CI  = sapply(temp_levels, function(temp) quantile(as.vector(get_post_samples(temp, posterior_preds, newdat2_subset)), probs = 0.025)),
+  upper_CI  = sapply(temp_levels, function(temp) quantile(as.vector(get_post_samples(temp, posterior_preds, newdat2_subset)), probs = 0.975))
+)
+
+# 4. Function to compute full posterior-based pMCMC for comparison vs reference
+pMCMC_vs_ref <- function(temp, ref = temp_levels[1], posterior_matrix, newdat) {
+  post_temp <- as.vector(get_post_samples(temp, posterior_matrix, newdat))
+  post_ref  <- as.vector(get_post_samples(ref, posterior_matrix, newdat))
   
-  pMCMC <- 2 * min(mean(diff > 0), mean(diff < 0))
-  q <- quantile(diff, probs = c(0.025, 0.975))
-  
-  data.frame(
-    contrast = paste(t2, "–", t1),
-    mean_diff = mean(diff),
-    lower = q[1],
-    upper = q[2],
-    pMCMC = pMCMC,
-    signif = case_when(
-      pMCMC < 0.005 ~ "**",
-      pMCMC < 0.05  ~ "*",
-      TRUE          ~ ""
-    )
-  )
+  diff <- post_temp - post_ref
+  2 * min(mean(diff > 0), mean(diff < 0))  # two-sided pMCMC
+}
+
+# 5. Compute pMCMC for each temperature vs 27.5°C
+marginal_summary$pMCMC_vs_27.5 <- sapply(temp_levels, function(temp) {
+  if(temp == temp_levels[1]) return(NA)  # reference vs itself
+  pMCMC_vs_ref(temp, ref = temp_levels[1], posterior_matrix = posterior_preds, newdat = newdat2_subset)
 })
 
-pairwise_results <- do.call(rbind, pairwise_results)
+# 6. Add significance labels
+marginal_summary$signif <- case_when(
+  marginal_summary$pMCMC_vs_27.5 < 0.005 ~ "**",
+  marginal_summary$pMCMC_vs_27.5 < 0.05  ~ "*",
+  TRUE                                   ~ ""
+)
+
+# 7. Ensure full precision is kept
+options(digits = 8)
+
+# 8. View results
+marginal_summary
+
+# 7b. Posterior predictions for marginal SymbiontTreatment effects
+# 1. Compute posterior predictions for all combinations (already done)
+#posterior_preds <- X_s %*% t(mod.s.reef$Sol)
+
+# Identify unique SymbiontTreatment levels
+sym_levels <- levels(totaldf_long$SymbiontTreatment)
+
+# 2. Function to extract all posterior samples for a given SymbiontTreatment
+get_post_samples_sym <- function(sym, posterior_matrix, newdat) {
+  rows <- which(newdat$SymbiontTreatment == sym)
+  posterior_matrix[rows, , drop = FALSE]  # keep full posterior for all rows
+}
+
+# 3. Compute marginal posterior summaries (mean + 95% CI)
+marginal_sym_summary <- data.frame(
+  SymbiontTreatment = sym_levels,
+  post_mean = sapply(sym_levels, function(sym) mean(as.vector(get_post_samples_sym(sym, posterior_preds, newdat2_subset)))),
+  lower_CI  = sapply(sym_levels, function(sym) quantile(as.vector(get_post_samples_sym(sym, posterior_preds, newdat2_subset)), probs = 0.025)),
+  upper_CI  = sapply(sym_levels, function(sym) quantile(as.vector(get_post_samples_sym(sym, posterior_preds, newdat2_subset)), probs = 0.975))
+)
+
+# 4. Function to compute full posterior-based pMCMC vs reference SymbiontTreatment
+pMCMC_vs_ref_sym <- function(sym, ref = sym_levels[1], posterior_matrix, newdat) {
+  post_sym <- as.vector(get_post_samples_sym(sym, posterior_matrix, newdat))
+  post_ref <- as.vector(get_post_samples_sym(ref, posterior_matrix, newdat))
+  
+  diff <- post_sym - post_ref
+  2 * min(mean(diff > 0), mean(diff < 0))  # two-sided pMCMC
+}
+
+# 5. Compute pMCMC for each SymbiontTreatment vs reference
+marginal_sym_summary$pMCMC_vs_ref <- sapply(sym_levels, function(sym) {
+  if(sym == sym_levels[1]) return(NA)  # reference vs itself
+  pMCMC_vs_ref_sym(sym, ref = sym_levels[1], posterior_matrix = posterior_preds, newdat = newdat2_subset)
+})
+
+# 6. Add significance labels
+marginal_sym_summary$signif <- case_when(
+  marginal_sym_summary$pMCMC_vs_ref < 0.005 ~ "**",
+  marginal_sym_summary$pMCMC_vs_ref < 0.05  ~ "*",
+  TRUE                                      ~ ""
+)
+
+# 7. View results
+marginal_sym_summary
+
+# 7c. Posterior predictions for marginal Cross_2 (Population) effects
+# 1. posterior_preds already computed:
+# posterior_preds <- X %*% t(model3.reef$Sol)
+
+# Identify unique population levels
+pop_levels <- levels(totaldf_long$Cross_2)
+
+# 2. Function to extract posterior draws for a given population
+get_post_samples_pop <- function(pop, posterior_matrix, newdat) {
+  rows <- which(newdat$Cross_2 == pop)
+  posterior_matrix[rows, , drop = FALSE]
+}
+
+# 3. Marginal posterior summaries (mean + 95% CI)
+marginal_pop_summary <- data.frame(
+  Cross_2 = pop_levels,
+  post_mean = sapply(pop_levels, function(pop)
+    mean(as.vector(get_post_samples_pop(pop, posterior_preds, newdat2_subset)))
+  ),
+  lower_CI = sapply(pop_levels, function(pop)
+    quantile(as.vector(get_post_samples_pop(pop, posterior_preds, newdat2_subset)),
+             probs = 0.025)
+  ),
+  upper_CI = sapply(pop_levels, function(pop)
+    quantile(as.vector(get_post_samples_pop(pop, posterior_preds, newdat2_subset)),
+             probs = 0.975)
+  )
+)
+
+# 4. Posterior-based pMCMC for contrasts vs reference population
+pMCMC_vs_ref_pop <- function(pop, ref = pop_levels[1], posterior_matrix, newdat) {
+  post_pop <- as.vector(get_post_samples_pop(pop, posterior_matrix, newdat))
+  post_ref <- as.vector(get_post_samples_pop(ref, posterior_matrix, newdat))
+  
+  diff <- post_pop - post_ref
+  2 * min(mean(diff > 0), mean(diff < 0))  # two-sided
+}
+
+# 5. Compute pMCMC for each vs reference
+marginal_pop_summary$pMCMC_vs_ref <- sapply(pop_levels, function(pop) {
+  if(pop == pop_levels[1]) return(NA)
+  pMCMC_vs_ref_pop(pop, ref = pop_levels[1],
+                   posterior_matrix = posterior_preds, newdat = newdat2_subset)
+})
+
+# 6. Add simple significance labels
+marginal_pop_summary$signif <- case_when(
+  marginal_pop_summary$pMCMC_vs_ref < 0.005 ~ "**",
+  marginal_pop_summary$pMCMC_vs_ref < 0.05  ~ "*",
+  TRUE                                      ~ ""
+)
+
+# Optional precision
+options(digits = 8)
+
+# 7. View results
+marginal_pop_summary
+
+
 
 #############################
 ### Modeling variables separate for each health metric to get relative contributions ###
@@ -3255,6 +3623,35 @@ emm_treatment_df <- as.data.frame(emm_treatment) %>%
 emm_treatment_df        # mean survival ± SE or CI for each temperature
 pairwise_treatment_df   # all pairwise contrasts and significance
 
+# pairwise for population
+emm_pop <- emmeans(mod_betabin2, ~ host)
+
+pairwise_pop <- pairs(emm_pop, adjust = "tukey")
+
+pairwise_pop_df <- as.data.frame(pairwise_pop) %>%
+  mutate(
+    signif_label = case_when(
+      p.value < 0.005 ~ "**",
+      p.value < 0.05  ~ "*",
+      TRUE            ~ ""
+    ),
+    label_combined = paste0(round(estimate, 2), signif_label)
+  )
+
+# pairwise for symbiont
+emm_symb <- emmeans(mod_betabin2, ~ symbiont)
+
+pairwise_symb <- pairs(emm_symb, adjust = "tukey")
+
+pairwise_symb_df <- as.data.frame(pairwise_symb) %>%
+  mutate(
+    signif_label = case_when(
+      p.value < 0.005 ~ "**",
+      p.value < 0.05  ~ "*",
+      TRUE            ~ ""
+    ),
+    label_combined = paste0(round(estimate, 2), signif_label)
+  )
 
 # Option 1: Using sjstats
 install.packages("sjstats")
@@ -6049,7 +6446,7 @@ ipam <- ipam %>%
 
 #Calculate the percentage of larvae with cells per vial for summary plot. Assuming that FvFm > 0 indicates larvae with cells:
 summary_df <- ipam %>%
-  group_by(Timepoint, TREATMENT) %>%
+  group_by(TIMEPOINT, TREATMENT) %>%
   summarize(PercentageWithCells = mean(FvFm > 0, na.rm = TRUE) * 100)
 
 #create figure
@@ -8118,37 +8515,158 @@ ggplot(newdat_perc, aes(x = Treatment, y = Cross, fill = mean_control)) +
   labs(title = "Predicted Change in Cell Density (No 35.5)",
        x = "Treatment", y = "Host Genotype")
 
-# 7. Posterior predictions for each Treatment
-pred_matrix_subset <- X_s %*% t(model_perc$Sol)
-rownames(pred_matrix_subset) <- newdat_perc$Treatment
+# 7. # Posterior predictions for marginal temperature effects
+# 1. Compute posterior predictions for all combinations
+posterior_preds <- X_subset %*% t(model_perc$Sol)
 
-# All pairwise comparisons
-treatments <- levels(ipam$Treatment)
-pairwise_comparisons <- t(combn(treatments, 2))  # all unique pairs
+# Identify unique temperatures
+temp_levels <- levels(ipam$Treatment)
 
-pairwise_results <- apply(pairwise_comparisons, 1, function(pair) {
-  t1 <- pair[1]
-  t2 <- pair[2]
-  diff <- pred_matrix_subset[t2, ] - pred_matrix_subset[t1, ]
+# 2. Function to extract all posterior samples for a given temperature (all Symbiont × Cross)
+get_post_samples <- function(temp, posterior_matrix, newdat) {
+  rows <- which(newdat$Treatment == temp)
+  posterior_matrix[rows, , drop = FALSE]  # keep full posterior for all rows
+}
+
+# 3. Compute marginal posterior summaries (mean + 95% CI)
+marginal_summary <- data.frame(
+  Temperature = temp_levels,
+  post_mean = sapply(temp_levels, function(temp) mean(as.vector(get_post_samples(temp, posterior_preds, newdat_perc)))),
+  lower_CI  = sapply(temp_levels, function(temp) quantile(as.vector(get_post_samples(temp, posterior_preds, newdat_perc)), probs = 0.025)),
+  upper_CI  = sapply(temp_levels, function(temp) quantile(as.vector(get_post_samples(temp, posterior_preds, newdat_perc)), probs = 0.975))
+)
+
+# 4. Function to compute full posterior-based pMCMC for comparison vs reference
+pMCMC_vs_ref <- function(temp, ref = temp_levels[1], posterior_matrix, newdat) {
+  post_temp <- as.vector(get_post_samples(temp, posterior_matrix, newdat))
+  post_ref  <- as.vector(get_post_samples(ref, posterior_matrix, newdat))
   
-  pMCMC <- 2 * min(mean(diff > 0), mean(diff < 0))
-  q <- quantile(diff, probs = c(0.025, 0.975))
-  
-  data.frame(
-    contrast = paste(t2, "–", t1),
-    mean_diff = mean(diff),
-    lower = q[1],
-    upper = q[2],
-    pMCMC = pMCMC,
-    signif = case_when(
-      pMCMC < 0.005 ~ "**",
-      pMCMC < 0.05  ~ "*",
-      TRUE          ~ ""
-    )
-  )
+  diff <- post_temp - post_ref
+  2 * min(mean(diff > 0), mean(diff < 0))  # two-sided pMCMC
+}
+
+# 5. Compute pMCMC for each temperature vs 27.5°C
+marginal_summary$pMCMC_vs_27.5 <- sapply(temp_levels, function(temp) {
+  if(temp == temp_levels[1]) return(NA)  # reference vs itself
+  pMCMC_vs_ref(temp, ref = temp_levels[1], posterior_matrix = posterior_preds, newdat = newdat_perc)
 })
 
-pairwise_results <- do.call(rbind, pairwise_results)
+# 6. Add significance labels
+marginal_summary$signif <- case_when(
+  marginal_summary$pMCMC_vs_27.5 < 0.005 ~ "**",
+  marginal_summary$pMCMC_vs_27.5 < 0.05  ~ "*",
+  TRUE                                   ~ ""
+)
+
+# 7. Ensure full precision is kept
+options(digits = 8)
+
+# 8. View results
+marginal_summary
+
+# 7b. Posterior predictions for marginal SymbiontTreatment effects
+# 1. Compute posterior predictions for all combinations (already done)
+#posterior_preds <- X_subset %*% t(model_perc$Sol)
+
+# Identify unique SymbiontTreatment levels
+sym_levels <- levels(ipam$SymbiontTreatment)
+
+# 2. Function to extract all posterior samples for a given SymbiontTreatment
+get_post_samples_sym <- function(sym, posterior_matrix, newdat) {
+  rows <- which(newdat$SymbiontTreatment == sym)
+  posterior_matrix[rows, , drop = FALSE]  # keep full posterior for all rows
+}
+
+# 3. Compute marginal posterior summaries (mean + 95% CI)
+marginal_sym_summary <- data.frame(
+  SymbiontTreatment = sym_levels,
+  post_mean = sapply(sym_levels, function(sym) mean(as.vector(get_post_samples_sym(sym, posterior_preds, newdat_perc)))),
+  lower_CI  = sapply(sym_levels, function(sym) quantile(as.vector(get_post_samples_sym(sym, posterior_preds, newdat_perc)), probs = 0.025)),
+  upper_CI  = sapply(sym_levels, function(sym) quantile(as.vector(get_post_samples_sym(sym, posterior_preds, newdat_perc)), probs = 0.975))
+)
+
+# 4. Function to compute full posterior-based pMCMC vs reference SymbiontTreatment
+pMCMC_vs_ref_sym <- function(sym, ref = sym_levels[1], posterior_matrix, newdat) {
+  post_sym <- as.vector(get_post_samples_sym(sym, posterior_matrix, newdat))
+  post_ref <- as.vector(get_post_samples_sym(ref, posterior_matrix, newdat))
+  
+  diff <- post_sym - post_ref
+  2 * min(mean(diff > 0), mean(diff < 0))  # two-sided pMCMC
+}
+
+# 5. Compute pMCMC for each SymbiontTreatment vs reference
+marginal_sym_summary$pMCMC_vs_ref <- sapply(sym_levels, function(sym) {
+  if(sym == sym_levels[1]) return(NA)  # reference vs itself
+  pMCMC_vs_ref_sym(sym, ref = sym_levels[1], posterior_matrix = posterior_preds, newdat = newdat_perc)
+})
+
+# 6. Add significance labels
+marginal_sym_summary$signif <- case_when(
+  marginal_sym_summary$pMCMC_vs_ref < 0.005 ~ "**",
+  marginal_sym_summary$pMCMC_vs_ref < 0.05  ~ "*",
+  TRUE                                      ~ ""
+)
+
+# 7. View results
+marginal_sym_summary
+
+# 7c. Posterior predictions for marginal Cross_2 (Population) effects
+# 1. posterior_preds already computed:
+# posterior_preds <- X_subset %*% t(model_perc$Sol)
+
+# Identify unique population levels
+pop_levels <- levels(ipam$Cross)
+
+# 2. Function to extract posterior draws for a given population
+get_post_samples_pop <- function(pop, posterior_matrix, newdat) {
+  rows <- which(newdat$Cross == pop)
+  posterior_matrix[rows, , drop = FALSE]
+}
+
+# 3. Marginal posterior summaries (mean + 95% CI)
+marginal_pop_summary <- data.frame(
+  Cross = pop_levels,
+  post_mean = sapply(pop_levels, function(pop)
+    mean(as.vector(get_post_samples_pop(pop, posterior_preds, newdat_perc)))
+  ),
+  lower_CI = sapply(pop_levels, function(pop)
+    quantile(as.vector(get_post_samples_pop(pop, posterior_preds, newdat_perc)),
+             probs = 0.025)
+  ),
+  upper_CI = sapply(pop_levels, function(pop)
+    quantile(as.vector(get_post_samples_pop(pop, posterior_preds, newdat_perc)),
+             probs = 0.975)
+  )
+)
+
+# 4. Posterior-based pMCMC for contrasts vs reference population
+pMCMC_vs_ref_pop <- function(pop, ref = pop_levels[1], posterior_matrix, newdat) {
+  post_pop <- as.vector(get_post_samples_pop(pop, posterior_matrix, newdat))
+  post_ref <- as.vector(get_post_samples_pop(ref, posterior_matrix, newdat))
+  
+  diff <- post_pop - post_ref
+  2 * min(mean(diff > 0), mean(diff < 0))  # two-sided
+}
+
+# 5. Compute pMCMC for each vs reference
+marginal_pop_summary$pMCMC_vs_ref <- sapply(pop_levels, function(pop) {
+  if(pop == pop_levels[1]) return(NA)
+  pMCMC_vs_ref_pop(pop, ref = pop_levels[1],
+                   posterior_matrix = posterior_preds, newdat = newdat_perc)
+})
+
+# 6. Add simple significance labels
+marginal_pop_summary$signif <- case_when(
+  marginal_pop_summary$pMCMC_vs_ref < 0.005 ~ "**",
+  marginal_pop_summary$pMCMC_vs_ref < 0.05  ~ "*",
+  TRUE                                      ~ ""
+)
+
+# Optional precision
+options(digits = 8)
+
+# 7. View results
+marginal_pop_summary
 
 # 8. Now just restrict to T1-T4
 ipam_subset <- ipam %>%
