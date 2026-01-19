@@ -2750,6 +2750,9 @@ df_subset$Treatment <- droplevels(df_subset$Treatment)
 
 df_subset$logChangeCells <- log(df_subset$PercChangeCells + 1)
 
+range(df_subset$PercChangeCells, na.rm=TRUE)
+
+
 #check how many observations per group
 table(df_subset$SymbiontTreatment, df_subset$Cross_2, df_subset$Treatment)
 
@@ -6886,6 +6889,32 @@ print(combined_plot_mean_area)
 # Save the combined plot as a PNG file
 ggsave("combined_plot_mean_area_inset.png", plot = combined_plot_mean_area, width = 6, height = 3, dpi = 300)
 
+
+library(dplyr)
+
+# Day 1 means collapsed across Cross_2 and SymbiontTreatment
+day1_temp_df <- df_clean %>%
+  filter(Timepoint == 1) %>%
+  group_by(Treatment) %>%
+  summarise(
+    n = sum(!is.na(Area..mm.2.)),
+    mean_area = mean(Area..mm.2., na.rm = TRUE),
+    se_area   = sd(Area..mm.2., na.rm = TRUE) / sqrt(n),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    Treatment = factor(Treatment, levels = c("Ambient", "31", "35.5"))
+  )
+
+# Ensure all 3 temperatures appear (fill missing with NA, not 0)
+all_temps <- tibble(Treatment = factor(c("Ambient","31","35.5"),
+                                      levels = c("Ambient","31","35.5")))
+
+day1_temp_df_full <- all_temps %>%
+  left_join(day1_temp_df, by = "Treatment")
+
+day1_temp_df_full
+
 ```
 
 Plot of percent change in size
@@ -8514,6 +8543,31 @@ ggplot(newdat_perc, aes(x = Treatment, y = Cross, fill = mean_control)) +
   theme_minimal() +
   labs(title = "Predicted Change in Cell Density (No 35.5)",
        x = "Treatment", y = "Host Genotype")
+
+# posterior draws for the contrast
+diff_CC_31 <- pred_matrix_subset[6, ] - pred_matrix_subset[5, ]
+diff_WW_31 <- pred_matrix_subset[8, ] - pred_matrix_subset[7, ]
+
+# pMCMC
+pMCMC_CC_31 <- 2 * min(
+  mean(diff_CC_31 > 0),
+  mean(diff_CC_31 < 0)
+)
+
+pMCMC_WW_31 <- 2 * min(
+  mean(diff_WW_31 > 0),
+  mean(diff_WW_31 < 0)
+)
+
+# summary
+mean(diff_CC_31)
+quantile(diff_CC_31, c(0.025, 0.975))
+pMCMC_CC_31
+
+mean(diff_WW_31)
+quantile(diff_WW_31, c(0.025, 0.975))
+pMCMC_WW_31
+
 
 # 7. # Posterior predictions for marginal temperature effects
 # 1. Compute posterior predictions for all combinations
