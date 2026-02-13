@@ -6,7 +6,7 @@ author: Sydney Bell
 updated: 02-13-2026
 ---
 
-#Load packages and data
+## Load packages and data
 ```{r}
 library('ggplot2'); packageVersion('ggplot2') #version 3.5.0
 library(dplyr)
@@ -266,7 +266,7 @@ cells_long <- cells %>%
                values_drop_na = TRUE)
 ```
 
-#Exploratory Survival plots
+## Exploratory Survival plots
 ```{r}
 #Family
 # Plot using ggplot2 with a smooth curve, facet by Treatment, and custom layout
@@ -353,1244 +353,9 @@ plotCul <- ggplot(df, aes(x = Timepoint, y = survival_percentage, color = as.fac
     strip.background = element_blank()  # Remove background of facet labels
   )
 plotCul
-
-
 ```
-## Cell Density: Exploratory Bar Graph
-```{r}
-
-# Create a bar graph
-ggplot(total_cells, aes(x = TubeID, y = Cells_End_Average)) +
-  geom_bar(stat = "identity") +
-  labs(x = "Tube ID", y = "Total Number of Cells") +
-  theme_minimal()
-
-# Create a bar graph with color by CellType
-ggplot(total_cells, aes(x = TubeID, y = Cells_End_Average, fill = CellType)) +
-  geom_bar(stat = "identity") +
-  labs(x = "Tube ID", y = "Total Number of Cells") +
-  theme_minimal()
-
-avg_cells <- cells_long %>%
-  group_by(Treatment) %>%
-  summarise(mean_density = mean(CellDensity, na.rm = TRUE),
-            sd_density = sd(CellDensity, na.rm = TRUE),
-            n = n(),
-            se_density = sd_density / sqrt(n))
-```
-## Cell Density: Exploratory Line Graph
-```{r}
-
-# Create a new data frame with start and end points for each TubeID
-combined_data <- data.frame(
-  Date = c(cells$T.Start, cells$T.End),
-  Cells = c(cells$Cells.Start, cells$Cells.End.Average),
-  TubeID = rep(cells$TubeID, 2),
-  Type = rep(c("Start", "End"), each = nrow(cells))
-)
-
-# Plot the line graph
-cellden = ggplot(combined_data, aes(x = Date, y = Cells, group = TubeID, color = Type)) +
-  geom_line() +
-  geom_point() +
-  geom_text(data = subset(combined_data, Type == "End"), 
-            aes(label = TubeID), vjust = -0.5, hjust = 1.5) +
-  labs(x = "Date", y = "Cell Density", color = "Type") +
-  theme_minimal()
-
-cellden
-#ggsave("celldensity.jpg", plot = cellden)
-```
-## Cell Density: Boxplot by Cross
-```{r}
-# Create the box plot
-celldenboxplot = ggplot(cells_long, aes(x = Cross, y = CellDensity, fill = Treatment)) +
-  geom_boxplot() +
-  labs(title = "Box Plot of Cell Density by Cross and Treatment",
-       x = "Cross",
-       y = "Cell Density") +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-  scale_fill_manual(values = treatment_colors)
-
-celldenboxplot
-
-#ggsave("celldensityboxplot.jpg", plot = boxplot, width = 25, height = 15)
-```
-## Cell Density: Boxplot by Reef, Cell Type, and Treatment
-```{r}
-# Create the boxplot
-celldenboxplot <- ggplot(cells_long, aes(x = Reef, y = CellDensity, fill = CellType)) +
-  geom_boxplot(position = position_dodge(width = 0.75)) +  # separate boxes for each CellType
-  facet_wrap(~ Treatment) +
-  labs(title = "Cell Density by Reef, Cell Type, and Treatment",
-       x = "Reef",
-       y = "Cell Density") +
-  theme_minimal() +
-  theme(
-    axis.text.x = element_text(angle = 45, hjust = 1),
-    strip.background = element_blank(),
-    strip.text = element_text(face = "bold")
-  )
-
-celldenboxplot
-
-# Load necessary library
-library(stats)
-
-# Perform Kruskal-Wallis test
-cells_long$Group <- paste(cells_long$Treatment,
-                          cells_long$CellType,
-                          sep = ".")
-
-
-kruskal.test(CellDensity ~ Group, data = cells_long)
-
-#Kruskal-Wallis rank sum test
-#data:  CellDensity by Treatment
-#Kruskal-Wallis chi-squared = 99.817, df = 5, p-value < 2.2e-16
-
-#Based on this result, there is a statistically significant difference in cell density among the different treatment, cell type, and Reef combinantions (Ambient, 31, and 35.5).
-
-#pairwise Wilcoxon rank-sum test (pairwise comparisons)
-pairwise.wilcox.test(cells_long$CellDensity, cells_long$Group, p.adjust.method = "BH")
-
-ggplot(cells_long, aes(x = Group, y = CellDensity)) +
-  geom_boxplot() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-```
-## Cell Density: Kruskal-Wallis test with Treatment
-```{r}
-# provided a very small p-value (< 2.2e-16), indicating strong evidence against the null hypothesis of normality
-shapiro.test(cells_long$CellDensity)
-#data is nonparametric
-
-# Load necessary library
-library(stats)
-
-# Perform Kruskal-Wallis test
-kw_result <- kruskal.test(CellDensity ~ Treatment, data = cells_long)
-
-# Check test result
-print(kw_result)
-
-#Kruskal-Wallis rank sum test
-#data:  CellDensity by Treatment
-#Kruskal-Wallis chi-squared = 90.004, df = 2, p-value < 2.2e-16
-
-#Based on this result, there is a statistically significant difference in cell density among the different treatments (Ambient, 31, and 35.5).
-
-# Example of pairwise Wilcoxon rank-sum test (pairwise comparisons)
-pairwise.wilcox.test(cells_long$CellDensity, cells_long$Treatment, p.adjust.method = "bonferroni")
-
-#Ambient vs. 31: The p-value is approximately 1, indicating no significant difference in cell density between Ambient and 31 treatments.
-#Ambient vs. 35.5: The adjusted p-value is < 2e-16, indicating a highly significant difference in cell density between Ambient and 35.5 treatments.
-#31 vs. 35.5: The adjusted p-value is also < 2e-16, indicating a highly significant difference in cell density between 31 and 35.5 treatments.
-
-```
-## Cell Density: Two-Way Repeated Measures ANOVA
-### 2 predictors: Treatment and CellType
-```{r}
-# 1. Check assumptions 
-########### TREATMENT #############
-# Convert Treatment to a factor
-cells_long$Treatment <- factor(cells_long$Treatment)
-str(cells_long)
-
-boxplot(cells_long$CellDensity ~ cells_long$Treatment)
-
-#Shapiro-Wilk test (H0: data is normal):
-shapiro.test(subset(cells_long, Treatment=='Ambient')$CellDensity)
-shapiro.test(subset(cells_long, Treatment=='31')$CellDensity)
-shapiro.test(subset(cells_long, Treatment=='35.5')$CellDensity)
-# …. (do a test for each level of the categorical variable)
-# NOT NORMAL p<0.005
-
-# Bartlett’s test (H0: variances are homogenous):
-bartlett.test(cells_long$CellDensity ~ cells_long$Treatment)
-#Bartlett's K-squared = Inf, df = 2, p-value < 2.2e-16
-# NOT HOMOGENOUS
-
-########## CELLTYPE #############
-# Convert CellType to a factor
-cells_long$CellType <- factor(cells_long$CellType)
-str(cells_long)
-
-boxplot(cells_long$CellDensity ~ cells_long$CellType)
-
-sample_sizes <- table(cells_long$CellType)
-#Shapiro-Wilk test (H0: data is normal):
-shapiro.test(subset(cells_long, CellType=='C')$CellDensity)
-shapiro.test(subset(cells_long, CellType=='D')$CellDensity)
-# …. (do a test for each level of the categorical variable)
-
-# Bartlett’s test (H0: variances are homogenous):
-bartlett.test(cells_long$CellDensity ~ cells_long$CellType)
-# Bartlett's K-squared = 24.126, df = 1, p-value = 9.024e-07
-# NOT HOMOGENOUS
-
-# 2. Assumptions are not met: Try scale transformations
-
-########### TREATMENT #############
-
-boxplot(sqrt(cells_long$CellDensity) ~ cells_long$Treatment) # square root transformed because we have counts
-
-#Shapiro-Wilk test (H0: data is normal):
-shapiro.test(sqrt(subset(cells_long, Treatment=='Ambient')$CellDensity))
-shapiro.test(sqrt(subset(cells_long, Treatment=='31')$CellDensity))
-shapiro.test(sqrt(subset(cells_long, Treatment=='35.5')$CellDensity))
-# …. (do a test for each level of the categorical variable)
-# NOT NORMAL p<0.005
-
-# Bartlett’s test (H0: variances are homogenous):
-bartlett.test(sqrt(cells_long$CellDensity) ~ cells_long$Treatment)
-#Bartlett's K-squared = Inf, df = 2, p-value < 2.2e-16
-# NOT HOMOGENOUS
-
-########## CELLTYPE #############
-
-boxplot(sqrt(cells_long$CellDensity) ~ cells_long$CellType) # square root transformed because we have counts
-
-sample_sizes <- table(cells_long$CellType)
-#Shapiro-Wilk test (H0: data is normal):
-shapiro.test(sqrt(subset(cells_long, CellType=='C')$CellDensity))
-shapiro.test(sqrt(subset(cells_long, CellType=='D')$CellDensity))
-# …. (do a test for each level of the categorical variable)
-
-# Bartlett’s test (H0: variances are homogenous):
-bartlett.test(sqrt(cells_long$CellDensity) ~ cells_long$CellType)
-# Bartlett's K-squared = 4.5066, df = 1, p-value = 0.03377
-# HOMOGENOUS
-
-# 3. Do non-parametric test by rank-transforming the data
-
-library(nlme)
-rDV<-rank(cells_long$CellDensity)
-
-lme.rank<-lme(fixed = rDV ~ Treatment * CellType, random=~1|Cross, data = cells_long)
-celldenanova <- anova (lme.rank)
-#                       numDF       denDF      F-value       p-value
-# (Intercept)             1         358        518.9960     <0.0001
-# Treatment               2         358         64.6619     <0.0001
-# CellType                1         358         1.8426      0.1755
-# Treatment:CellType      2         358         5.1615      0.0062
-
-plot(CellDensity ~ Treatment*CellType, data = cells_long)
-
-# Treatment: F(2, 358) = 64.6619, p = <0.0001
-# CellType: NOT sig
-# Interaction: F(2, 358) = 5.1615, p = 0.0062
-
-```
-##Cell density box plot
-Analyze significant interaction Treatment*CellType
-```{r}
-interaction.plot(cells_long$CellType, cells_long$Treatment, cells_long$CellDensity, 
-                 xlab="CellType", ylab="CellDensity", trace.label="Treatment")
-
-# Example using pairwise comparisons
-pairwise.t.test(cells_long$CellDensity, interaction(cells_long$Treatment, cells_long$CellType), p.adjust.method = "bonferroni")
-#	Pairwise comparisons using t tests with pooled SD 
-
-#data:  cells_long$CellDensity and interaction(cells_long$Treatment, cells_long$CellType) 
-
-#          Ambient.C 31.C    35.5.C  Ambient.D 31.D   
-#31.C      0.05188   -       -       -         -      
-#35.5.C    0.00012   1.00000 -       -         -      
-#Ambient.D 0.01986   1.00000 1.00000 -         -      
-#31.D      1.00000   1.00000 0.03891 1.00000   -      
-#35.5.D    0.00012   1.00000 1.00000 1.00000   0.03891
-
-#P value adjustment method: bonferroni 
-#install.packages("emmeans")
-library(emmeans)
-# Fit the linear mixed-effects model
-lme.rank <- lme(fixed = rDV ~ Treatment * CellType, random = ~1|Cross, data = cells_long)
-
-# Obtain the estimated marginal means
-emm <- emmeans(lme.rank, ~ Treatment * CellType)
-
-# Perform Tukey's post hoc test
-tukey_result <- pairs(emm, adjust = "tukey")
-
-# Print the results
-print(tukey_result)
-tukey_df <- as.data.frame(tukey_result)
-print(tukey_df)
-write.csv(tukey_df, "C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/tukey_posthoc_results.csv", row.names = FALSE)
-
-# Create boxplot with facets by CellType and colors by Treatment
-cells_long$Treatment <- factor(cells_long$Treatment, levels = c("Ambient", "31", "35.5"))
-
-
-ggplot(cells_long, aes(x = Treatment, y = CellDensity, fill = Treatment)) +
-  geom_boxplot() +
-  facet_grid(. ~ CellType) +
-  labs(title = "Boxplot of Cell Density by Treatment and Cell Type",
-       x = "Treatment",
-       y = "Cell Density",
-       fill = "Treatment") +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-  scale_fill_manual(values = c("Ambient" = "green","31" = "orange", "35.5" = "red"))
-
-```
-##Cell Density Boxplot for Publication
-```{r}
-library(ggplot2)
-library(ggpubr)  # for stat_compare_means
-library(dplyr)
-
-# 1. Recode Treatment factor levels with degree symbols
-cells_long$Treatment <- factor(cells_long$Treatment,
-    levels = c("Ambient", "31", "35.5"),
-    labels = c("27.5°C", "31°C", "35.5°C"))
-
-# 2. Recode CellType
-cells_long$CellType <- recode(cells_long$CellType,
-    "C" = "C",
-    "D" = "D"
-)
-
-# Recreate Group safely
-cells_long$Group <- paste0(cells_long$Treatment, "_", cells_long$CellType)
-cells_long$Group <- factor(cells_long$Group)
-
-# Check that it worked:
-table(cells_long$Group)
-
-# 3. Define comparisons for p-values
-my_comparisons <- list(
-  c("27.5°C_C", "27.5°C_D"),
-  c("31°C_C", "31°C_D"),
-  c("35.5°C_C", "35.5°C_D"),    # compare symbionts at 35.5°C
-  c("27.5°C_C", "31°C_C"),
-  c("31°C_C", "35.5°C_C"),      # compare temperatures for Cladocopium
-  c("27.5°C_D", "31°C_D"),
-  c("31°C_D", "35.5°C_D"),      # compare temperatures for Durusdinium
-  c("27.5°C_C", "35.5°C_C"),
-  c("27.5°C_D", "35.5°C_D")
-  )
-
-# Calculate p-values
-pvals_df <- lapply(my_comparisons, function(pair) {
-  group1_vals <- filter(cells_long, Group == pair[1])$CellDensity
-  group2_vals <- filter(cells_long, Group == pair[2])$CellDensity
-  
-  p_val <- tryCatch(
-    wilcox.test(group1_vals, group2_vals)$p.value,
-    error = function(e) NA_real_
-  )
-  
-  data.frame(
-    group1 = pair[1],
-    group2 = pair[2],
-    p_value = p_val,
-    comparison = paste(pair, collapse = " vs "),
-    stringsAsFactors = FALSE
-  )
-}) %>% bind_rows()
-
-# Format p-values nicely
-pvals_df <- pvals_df %>%
-  mutate(p_label = ifelse(is.na(p_value), "NA",
-                          ifelse(p_value < 0.001, "p < 0.001", paste0("p = ", signif(p_value, 3)))))
-pvals_df
-
-# Create a data frame of positions for each comparison
-# You need to find the numeric x-axis positions of groups in your plot (1 to 6 for 6 groups)
-
-group_levels <- levels(cells_long$Group)
-
-# Increase the horizontal line height a bit above the vertical lines
-pvals_df <- pvals_df %>%
-  mutate(
-    y_hline = y + 0.00 * max(cells_long$CellDensity),  # horizontal line a bit above y
-    y_label = y_hline + 0.025 * max(cells_long$CellDensity)  # label above horizontal line
-  )
-
-x_labels <- c(
-  expression("27.5°C " * italic("Cladocopium")),
-  expression("27.5°C " * italic("Durusdinium")),
-  expression("31°C " * italic("Cladocopium")),
-  expression("31°C " * italic("Durusdinium")),
-  expression("35.5°C " * italic("Cladocopium")),
-  expression("35.5°C " * italic("Durusdinium"))
-)
-
-legend_labels <- c(
-  "27.5°C_C" = expression("27.5°C " * italic("Cladocopium")),
-  "27.5°C_D" = expression("27.5°C " * italic("Durusdinium")),
-  "31°C_C"   = expression("31°C " * italic("Cladocopium")),
-  "31°C_D"   = expression("31°C " * italic("Durusdinium")),
-  "35.5°C_C" = expression("35.5°C " * italic("Cladocopium")),
-  "35.5°C_D" = expression("35.5°C " * italic("Durusdinium"))
-)
-
-celldensity_boxplot <- ggplot(cells_long, aes(x = Group, y = CellDensity, fill = Group)) +
-  geom_boxplot() +
-  scale_x_discrete(labels = x_labels) +
-  scale_fill_manual(
-    values = c(
-      "27.5°C_C" = "#abd9e9",
-      "31°C_C"   = "#fee08b",
-      "35.5°C_C" = "#d53e4f",
-      "27.5°C_D" = "#3288bd",
-      "31°C_D"   = "gold",
-      "35.5°C_D" = "#a50026"
-    ),
-    labels = unname(as.list(legend_labels))
-  ) +
-  # Your segments & text here, e.g.:
-  geom_segment(data = pvals_df,
-               aes(x = x1, xend = x1, y = y, yend = y_line),
-               inherit.aes = FALSE) +
-  geom_segment(data = pvals_df,
-               aes(x = x2, xend = x2, y = y, yend = y_line),
-               inherit.aes = FALSE) +
-  geom_segment(data = pvals_df,
-               aes(x = x1, xend = x2, y = y_hline, yend = y_hline),
-               inherit.aes = FALSE) +
-  geom_text(data = pvals_df,
-            aes(x = x, y = y_label, label = p_label),
-            inherit.aes = FALSE, size = 4) +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12)) +
-  theme(legend.text = element_text(size = 12))
-
-
-ggsave("C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/celldensity_boxplot.png", 
-       plot = celldensity_boxplot,  # Save the most recent plot
-       width = 10,          # Set the width of the plot (in inches)
-       height = 7,          # Set the height of the plot (in inches)
-       dpi = 300)           # Set the resolution (300 dpi is good for publications)  
-```
-
-
-##Survival Analysis
-### Cox model: with Treatment and ReefMom
-```{r}
-#Install package survival
-library(survival)
-
-str(metadata)
-
-# Determine the class of the Factors (not the covariates):
-class(metadata$Treatment)
-class(metadata$SymbiontTreatment)
-class(metadata$ReefMom)
-#If any of the factors is not a “factor”, redefine it as a factor:
-metadata$Treatment <- factor(metadata$Treatment)
-metadata$SymbiontTreatment <- factor(metadata$SymbiontTreatment)
-metadata$ReefMom <- factor(metadata$ReefMom)
-attach (metadata)
-
-# Create the Status column
-# Zero = Alive
-metadata$Status <- ifelse(metadata$`Alive..Dead..Sampled` == "Alive", 0, 1)
-# Check for missing values in the columns used in the model
-sum(is.na(metadata$Timepoint))
-sum(is.na(metadata$Status))
-sum(is.na(metadata$Treatment))
-sum(is.na(metadata$SymbiontTreatment))
-sum(is.na(metadata$ReefMom))
-
-# Keep the entire metadata dataset, but filter out rows with NA in specific columns
-metadata_clean <- metadata %>%
-  filter(!is.na(Timepoint) & !is.na(Status) & !is.na(Treatment) & !is.na(SymbiontTreatment) & !is.na(ReefMom))
-
-# Check the dimensions to ensure you retain all necessary columns
-dim(metadata_clean)  # Check number of rows and columns
-
-# Verify the changes
-head(metadata_clean)
-
-metadata_clean$Timepoint <- as.numeric(as.character(metadata_clean$Timepoint))
-
-X<-cbind(metadata_clean$Treatment, metadata_clean$SymbiontTreatment, metadata_clean$ReefMom)# if you don’t have covariates, do not include them
-# if observations are right censored:
-cox <- coxph(
-  Surv(Timepoint, Status) ~ Treatment + SymbiontTreatment + Cross_2,
-  data = metadata_clean,
-  method = "breslow"
-)
-cox<- coxph (Surv(Timepoint, Status)~ X, method='breslow', data = metadata_clean)
-summary(cox)
-
-cox_td <- coxph(
-  Surv(Timepoint, Status) ~ SymbiontTreatment + Cross_2 + 
-    tt(Treat31) + tt(Treat35.5),
-  data = transform(metadata_clean,
-                   Treat31 = as.numeric(Treatment == "31"),
-                   Treat35.5 = as.numeric(Treatment == "35.5")),
-  method = "breslow",
-  tt = function(x, t, ...) x * log(t)
-)
-summary(cox_td)
-# Create time grid
-time_grid <- seq(1, 22, length.out = 100)
-
-b <- coef(cox_td)
-
-# Compute HR for each treatment
-df <- data.frame(
-  Time = rep(time_grid, 2),
-  HR = c(exp(b["tt(Treat31)"] * log(time_grid + 1)),
-         exp(b["tt(Treat35.5)"] * log(time_grid + 1))),
-  Treatment = rep(c("31 °C", "35.5 °C"), each = length(time_grid)))
-
-ggplot(df, aes(x = Time, y = HR, color = Treatment)) +
-  geom_line(size = 1.2) +
-  geom_hline(yintercept = 1, linetype = "dashed") +
-  labs(x = "Time (days)", y = "Hazard Ratio vs Ambient") +
-  theme_minimal() +
-  scale_color_manual(values = c("blue", "red"))
-
-library(ggplot2)
-library(dplyr)
-library(tidyr)
-
-# Time grid (experiment ran 22 days)
-time_grid <- seq(1, 22, length.out = 100)
-
-# Coefficients and covariance matrix
-b <- coef(cox_td)
-V <- vcov(cox_td)  # covariance matrix
-
-# Function to compute HR(t) and CI
-compute_hr_ci <- function(coef_name, time_grid, b, V) {
-  logt <- log(time_grid + 1)          # log(time+1) for tt() term
-  hr <- exp(b[coef_name] * logt)      # HR(t)
-  
-  # Standard error for log(HR(t)) = log(HR) * sqrt(var)
-  se_log_hr <- sqrt(logt^2 * V[coef_name, coef_name])
-  
-  # 95% CI
-  hr_lower <- exp(log(hr) - 1.96 * se_log_hr)
-  hr_upper <- exp(log(hr) + 1.96 * se_log_hr)
-  
-  data.frame(
-    Time = time_grid,
-    HR = hr,
-    HR_lower = hr_lower,
-    HR_upper = hr_upper,
-    Treatment = coef_name
-  )
-}
-
-# Compute for both treatments
-df_31  <- compute_hr_ci("tt(Treat31)", time_grid, b, V)
-df_355 <- compute_hr_ci("tt(Treat35.5)", time_grid, b, V)
-
-# Combine into one data frame
-df_plot <- bind_rows(df_31, df_355)
-df_plot$Treatment <- recode(df_plot$Treatment, 
-                            "tt(Treat31)" = "31 °C",
-                            "tt(Treat35.5)" = "35.5 °C")
-
-ggplot(df_plot, aes(x = Time, y = HR, color = Treatment, fill = Treatment)) +
-  geom_line(size = 1.2) +
-  geom_ribbon(aes(ymin = HR_lower, ymax = HR_upper), alpha = 0.2, color = NA) +
-  geom_hline(yintercept = 1, linetype = "dashed") +
-  labs(x = "Time (days)", y = "Hazard Ratio vs Ambient") +
-  theme_minimal() +
-  scale_color_manual(values = c("blue", "red")) +
-  scale_fill_manual(values = c("blue", "red"))
-
-cox_3way <- coxph(
-  Surv(Timepoint, Status) ~ SymbiontTreatment * Treatment * Cross_2,
-  data = metadata_clean,
-  method = "breslow"
-)
-summary(cox_3way)
-
-metadata_clean2 <- transform(metadata_clean,
-                            Treat31 = as.numeric(Treatment == "31"),
-                            Treat35.5 = as.numeric(Treatment == "35.5"))
-library(survival)
-
-# Time-dependent function: linear in log(time)
-tt_fun <- function(x, t, ...) x * log(t)
-
-cox_td_3way <- coxph(
-  Surv(Timepoint, Status) ~ SymbiontTreatment * Cross_2 +
-    tt(Treat31) + tt(Treat35.5) +
-    SymbiontTreatment:tt(Treat31) + SymbiontTreatment:tt(Treat35.5) +
-    Cross_2:tt(Treat31) + Cross_2:tt(Treat35.5) +
-    SymbiontTreatment:Cross_2:tt(Treat31) + SymbiontTreatment:Cross_2:tt(Treat35.5),
-  data = metadata_clean2,
-  tt = tt_fun,
-  method = "breslow"
-)
-summary(cox_td_3way)
-
-time_grid <- 1:22  # experiment duration
-
-# Extract coefficients
-coefs <- coef(cox_td_3way)
-
-# Example: HR for 31°C, Symbiont C, Cross reference (baseline)
-hr_31_C_ref <- exp(coefs["tt(Treat31)"] * log(time_grid))
-# HR for 35.5°C, Symbiont C, Cross reference (baseline)
-hr_355_C_ref <- exp(coefs["tt(Treat35.5)"] * log(time_grid))
-
-# HR for 31°C, Symbiont D, Cross TxT
-hr_31_D_TxT <- exp(
-  coefs["tt(Treat31)"] * log(time_grid) +
-  coefs["SymbiontTreatmentD:tt(Treat31)"] * log(time_grid) +
-  coefs["Cross_2TxT:tt(Treat31)"] * log(time_grid) +
-  coefs["SymbiontTreatmentD:Cross_2:tt(Treat31)"] * log(time_grid)
-)
-
-# HR for 35.5°C, Symbiont D, Cross TxT
-hr_355_D_TxT <- exp(
-  coefs["tt(Treat35.5)"] * log(time_grid) +
-  coefs["SymbiontTreatmentD:tt(Treat35.5)"] * log(time_grid) +
-  coefs["Cross_2TxT:tt(Treat35.5)"] * log(time_grid) +
-  coefs["SymbiontTreatmentD:Cross_2:tt(Treat35.5)"] * log(time_grid)
-)
-library(ggplot2)
-df_hr <- data.frame(
-  Day = rep(time_grid, 4),
-  HR = c(hr_31_C_ref, hr_31_D_TxT, hr_355_C_ref, hr_355_D_TxT),
-  Group = rep(c("31°C C BxB", "31°C D TxT", "35.5°C C BxB", "35.5°C D TxT"), each = length(time_grid))
-)
-
-ggplot(df_hr, aes(x = Day, y = HR, color = Group)) +
-  geom_line(size = 1.2) +
-  labs(x = "Time (days)", y = "Hazard Ratio vs Ambient") +
-  theme_minimal() +
-  scale_color_brewer(palette = "Set1")
-
-
-# Test proportional hazards assumption
-ph_test <- cox.zph(cox_3way)
-print(ph_test)
-
-#Call:
-#coxph(formula = Surv(Timepoint, Status) ~ X, data = metadata, 
-#    method = "breslow")
-
-#  n= 2772, number of events= 1041 
-#   (345 observations deleted due to missingness)
-
-#                       coef exp(coef) se(coef)      z Pr(>|z|)    
-#XTreatment         -0.24448   0.78311  0.03853 -6.346 2.22e-10 ***
-#XSymbiontTreatment  0.04804   1.04921  0.06201  0.775  0.43848    
-#XReefMom           -0.04209   0.95878  0.01553 -2.710  0.00673 ** 
-#---
-#Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
-
-#                   exp(coef) exp(-coef) lower .95 upper .95
-#XTreatment            0.7831     1.2770    0.7262    0.8445
-#XSymbiontTreatment    1.0492     0.9531    0.9291    1.1848
-#XReefMom              0.9588     1.0430    0.9300    0.9884
-
-#Concordance= 0.546  (se = 0.01 )
-#Likelihood ratio test= 48.83  on 3 df,   p=1e-10
-#Wald test            = 48.21  on 3 df,   p=2e-10
-#Score (logrank) test = 48.62  on 3 df,   p=2e-10
-
-# Not all predictors are significant so use backward stepwise model selection to remove the most insignificant factor (symbiont treatment)
-
-X2<-cbind(metadata_clean$Treatment, metadata_clean$ReefMom)# if you don’t have covariates, do not include them
-# if observations are right censored:
-cox2<- coxph (Surv(Timepoint, Status)~ X2, method='breslow', data = metadata_clean)
-summary(cox2)
-
-#Call:
-#coxph(formula = Surv(Timepoint, Status) ~ X2, data = metadata, 
-#    method = "breslow")
-
-#  n= 2772, number of events= 1041 
-#   (345 observations deleted due to missingness)
-
-#                coef exp(coef) se(coef)      z Pr(>|z|)    
-#X2Treatment -0.24448   0.78311  0.03853 -6.346 2.22e-10 ***
-#X2ReefMom   -0.04209   0.95878  0.01553 -2.710  0.00673 ** 
-#---
-#Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
-
-#            exp(coef) exp(-coef) lower .95 upper .95
-#X2Treatment    0.7831      1.277    0.7262    0.8445
-#X2ReefMom      0.9588      1.043    0.9300    0.9884
-
-#Concordance= 0.546  (se = 0.01 )
-#Likelihood ratio test= 48.23  on 2 df,   p=3e-11
-#Wald test            = 47.61  on 2 df,   p=5e-11
-#Score (logrank) test = 48.02  on 2 df,   p=4e-11
-
-# Compare models
-AIC(cox, cox2) #cox2 has the lowest AIC so we keep it
-
-# Plot
-# To plot the predicted probability of an event not occurring over time (for significant factors only) and use the model to make predictions
-
-km <-survfit(Surv(Timepoint,Status)~ Treatment + ReefMom, data = metadata_clean) # do not include interactions
-km
-summary(km)
-
-# Plot the survival curves
-km$strata
-
-# Plot the Kaplan-Meier curve
-plot(km, 
-     lwd = 2, 
-     xlab = 'Time', 
-     ylab = 'Probability of the Event not to occur', 
-     lty = c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21),
-     col = c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21),  # Dynamically adjust colors
-     conf.int = FALSE)
-
-#Use ggplot
-#install.packages("survminer")
-library(survminer)
-require("survival")
-ggsurvplot(km)
-# Create a combined label for legend
-metadata_clean$combined_label <- with(metadata_clean, paste(Treatment, ReefMom, sep = "."))
-
-# Now refit the survival object
-km <- survfit(Surv(Timepoint, Status) ~ combined_label, data = metadata_clean)
-
-# Generate unique labels for the legend based on combined_label
-unique_combined_labels <- levels(as.factor(metadata_clean$combined_label))
-
-# Plot the survival curves
-ggsurv_all <- ggsurvplot(km, 
-           data = metadata_clean, 
-           conf.int = TRUE, 
-           pval = TRUE, 
-           risk.table = FALSE, 
-           legend.title = "Treatment.ReefMom",
-           legend.labs = unique_combined_labels,  # Now use combined labels
-           title = "Kaplan-Meier Curve for Genet Survival", 
-           risk.table.height = 2)
-
-#ggsave("C:/Users/bellb/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/survival_curves.png", plot = ggsurv_all$plot, width = 10, height = 8, dpi = 300)
-
-ggsurv_all$plot +theme_bw()
-
-### FACET
-# Fit the Kaplan-Meier survival curve
-km2 <- survfit(Surv(Timepoint, Status) ~ Treatment + ReefMom, data = metadata_clean)
-
-ggsurv <- ggsurvplot(km2, conf.int = TRUE)
-
-ggsurv$plot +theme_bw() + facet_wrap(~ Treatment)
-
-# Ensure Treatment is a factor with specified levels
-metadata_clean$Treatment <- factor(metadata_clean$Treatment, levels = c("Ambient", "31", "35.5"))
-
-# Create custom color names for each curve
-custom_curve_names <- c("coral2", "orange", "darkkhaki", "aquamarine3", "darkred", "darkorchid", "blue","coral2", "orange", "darkkhaki", "aquamarine3", "darkred", "darkorchid", "blue","coral2", "orange", "darkkhaki", "aquamarine3", "darkred", "darkorchid", "blue"
-)
-
-levels(km2$strata)
-
-# Create the survival plot with custom colors
-ggsurv <- ggsurvplot(km2, conf.int = TRUE, 
-                     palette = custom_curve_names,  # Custom color palette
-                     legend.title = "ReefMom",
-                     conf.int.alpha = 0.2)  # Set legend title
-
-# Customize the plot
-survival_curves_facet_ReefMom <- ggsurv$plot + 
-    theme_bw() + 
-    facet_wrap(~ Treatment)  # Faceting by Treatment
-
-#ggsave("C:/Users/bellb/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/survival_curves_facet_ReefMom.png", plot = survival_curves_facet_ReefMom, width = 10, height = 5, dpi = 300)
-
-#Bonferroni post-hoc test
-# Perform pairwise comparisons of survival curves
-pairs <- pairwise_survdiff(Surv(Timepoint, Status) ~ Treatment + ReefMom, 
-                  data = metadata_clean,
-                  p.adjust.method = "bonferroni")
-
-pairs
-
-# Symbolic number coding
-symnum(pairs$p.value, cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, 0.1, 1),
-   symbols = c("****", "***", "**", "*", "+", " "),
-   abbr.colnames = FALSE, na = "")
-
-# Extract survival probabilities at a specific time, e.g., time = 22
-# You can do this using the 'summary()' function with the 'time' argument
-surv_summary <- summary(km2, times = 22)
-
-# Print the survival probability at time 22
-print(surv_summary$surv)  # This gives the survival probabilities
-
-
-#########
-# Try interactions just to confirm SymbiontTreatment isn't significant
-########
-
-# Fit Cox proportional hazards model with interactions
-cox.int <- coxph(Surv(Timepoint, Status) ~ Treatment * SymbiontTreatment * ReefMom, 
-             method = 'breslow', data = metadata_clean)
-
-# Display the summary of the model
-summary(cox.int)
-
-#SymbiontTreatment is not significant
-
-#########
-# Plot original model with SymbiontTreatment for visual
-# Final Plot
-########
-metadata_clean$Treatment <- factor(metadata_clean$Treatment, levels = c("Ambient", "31", "35.5"))
-metadata_clean$ReefMom <- factor(metadata_clean$ReefMom,
-                                levels = c("BT2", "BT4", "BT8", "Bulk", "TT12", "TT2", "TT6"),  # your original levels
-                                labels = c("CC1", "CC2", "CC3", "WW1", "WW2", "WW3", "WW4"))  # new display names
-
-metadata_clean$SymbiontTreatment <- factor(metadata_clean$SymbiontTreatment,
-                                          levels = c("C", "D"),  # original levels
-                                          labels = c("Cladocopium", "Durusdinium"))  # new display names
-
-
-# Fit survival by Treatment + ReefMom + SymbiontTreatment
-km.symb <- survfit(Surv(Timepoint, Status) ~ Treatment + ReefMom + SymbiontTreatment, data = metadata_clean)
-
-# Extract Treatment from strata names
-strata_names <- names(km.symb$strata)
-
-# Extract Treatment from each strata string
-library(stringr)
-treatment_in_strata <- str_extract(strata_names, "(?<=Treatment=)[^,]+")
-
-# Create a vector mapping each strata to one of your 3 colors
-my_colors_42 <- ifelse(treatment_in_strata == "Ambient", "#3288bd",
-                 ifelse(treatment_in_strata == "31", "#fee08b",
-                        ifelse(treatment_in_strata == "35.5", "#d53e4f", "black")))
-
-names(my_colors_42) <- strata_names
-
-# Now pass this as palette to ggsurvplot
-ggsurv <- ggsurvplot(km.symb,
-                     conf.int = TRUE,
-                     palette = my_colors_42,
-                     legend.title = "Treatment",
-                     conf.int.alpha = 0.2)
-
-# Add facets
-survival_curves_facet_Symb <- ggsurv$plot +
-    theme_bw() +
-    facet_grid(ReefMom ~ SymbiontTreatment) + theme(
-    strip.background = element_blank(),  # removes the grey background box
-    strip.text = element_text(color = "black", face = "bold", size = 12),
-    legend.position = "none" # text styling
-  )
-
-print(survival_curves_facet_Symb)
-
-time_grid <- 1:22  # experiment duration in days
-coefs <- coef(cox_td_3way)
-library(dplyr)
-
-combinations <- expand.grid(
-  SymbiontTreatment = c("C", "D"),
-  Temperature = c("31", "35.5"),
-  Cross_2 = c("BxB", "TxT")
-)
-compute_hr <- function(symbiont, temp, cross, coefs, time_grid) {
-  
-  # Identify the relevant tt term
-  tt_term <- if(temp == "31") "tt(Treat31)" else "tt(Treat35.5)"
-  
-  # Start with main time-dependent effect
-  hr_log <- coefs[tt_term] * log(time_grid)
-  
-  # Symbiont × tt
-  sym_tt <- paste0("SymbiontTreatmentD:", tt_term)
-  if(symbiont == "D" & sym_tt %in% names(coefs)) hr_log <- hr_log + coefs[sym_tt] * log(time_grid)
-  
-  # Cross × tt
-  cross_tt <- paste0("Cross_2TxT:", tt_term)
-  if(cross == "TxT" & cross_tt %in% names(coefs)) hr_log <- hr_log + coefs[cross_tt] * log(time_grid)
-  
-  # Three-way interaction
-  threeway <- paste0("SymbiontTreatmentD:", "Cross_2TxT:", tt_term)
-  if(symbiont == "D" & cross == "TxT" & threeway %in% names(coefs)) hr_log <- hr_log + coefs[threeway] * log(time_grid)
-  
-  exp(hr_log)
-}
-hr_list <- mapply(
-  FUN = compute_hr,
-  symbiont = combinations$SymbiontTreatment,
-  temp = combinations$Temperature,
-  cross = combinations$Cross_2,
-  MoreArgs = list(coefs = coefs, time_grid = time_grid),
-  SIMPLIFY = FALSE
-)
-df_hr <- do.call(rbind, lapply(1:nrow(combinations), function(i) {
-  data.frame(
-    Day = time_grid,
-    HR = hr_list[[i]],
-    Group = paste(combinations$Temperature[i], combinations$SymbiontTreatment[i], combinations$Cross_2[i], sep = "°C ")
-  )
-}))
-ggplot(df_hr, aes(x = Day, y = HR, color = Group)) +
-  geom_line(size = 1.2) +
-  labs(x = "Time (days)", y = "Hazard Ratio vs Ambient") +
-  theme_minimal() +
-  scale_color_brewer(palette = "Set1")
-
-# 1️⃣ Compute HR for baseline group: Ambient BxB + C
-baseline_hr <- compute_hr(symbiont = "C", temp = "31", cross = "BxB", coefs = coefs, time_grid = time_grid)
-# If you want Ambient group to include both temps as reference, repeat accordingly
-
-# 2️⃣ Adjust all HRs relative to baseline
-df_hr <- do.call(rbind, lapply(1:nrow(combinations), function(i) {
-  hr_adj <- hr_list[[i]] / baseline_hr  # divide by baseline to get relative HR
-  data.frame(
-    Day = time_grid,
-    HR = hr_adj,
-    Group = paste(combinations$Temperature[i], combinations$SymbiontTreatment[i], combinations$Cross_2[i], sep = "°C ")
-  )
-}))
-
-# 3️⃣ Plot
-ggplot(df_hr, aes(x = Day, y = HR, color = Group)) +
-  geom_line(size = 1.2) +
-  labs(x = "Time (days)", y = "Hazard Ratio vs Ambient BxB C") +
-  theme_minimal() +
-  scale_color_brewer(palette = "Set1")
-
-
-
-
-
-
-
-# --- 1️⃣ Define time grid ---
-time_grid <- 1:22  # experiment duration in days
-
-# --- 2️⃣ Extract coefficients and variance-covariance matrix ---
-coefs <- coef(cox_td_3way)
-vcov_mat <- vcov(cox_td_3way)
-
-# --- 3️⃣ Define all combinations ---
-combinations <- expand.grid(
-  SymbiontTreatment = c("C", "D"),
-  Temperature = c("31", "35.5"),
-  Cross_2 = c("BxB", "TxT")
-)
-
-# --- 4️⃣ Function to compute HR(t) and 95% CI ---
-compute_hr_ci <- function(symbiont, temp, cross, coefs, vcov_mat, time_grid) {
-  
-  tt_term <- if(temp == "31") "tt(Treat31)" else "tt(Treat35.5)"
-  
-  # Build coefficient vector for this combination
-  coef_vec <- rep(0, length(coefs))
-  names(coef_vec) <- names(coefs)
-  
-  # Main time-dependent effect
-  coef_vec[tt_term] <- 1
-  
-  # Symbiont × tt
-  sym_tt <- paste0("SymbiontTreatmentD:", tt_term)
-  if(symbiont == "D" & sym_tt %in% names(coefs)) coef_vec[sym_tt] <- 1
-  
-  # Cross × tt
-  cross_tt <- paste0("Cross_2TxT:", tt_term)
-  if(cross == "TxT" & cross_tt %in% names(coefs)) coef_vec[cross_tt] <- 1
-  
-  # Three-way interaction
-  threeway <- paste0("SymbiontTreatmentD:Cross_2TxT:", tt_term)
-  if(symbiont == "D" & cross == "TxT" & threeway %in% names(coefs)) coef_vec[threeway] <- 1
-  
-  # Indices of used coefficients
-  idx <- which(coef_vec != 0)
-  
-  # Compute log(HR) for each time
-  log_hr <- sapply(time_grid, function(t) sum(coef_vec[idx] * log(t)))
-  
-  # Compute SE for each time point (delta method)
-  se_log_hr <- sapply(time_grid, function(t) sqrt(sum((log(t)^2) * diag(vcov_mat[idx, idx]))))
-  
-  # HR and 95% CI
-  data.frame(Day = time_grid,
-             HR = exp(log_hr),
-             Lower = exp(log_hr - 1.96 * se_log_hr),
-             Upper = exp(log_hr + 1.96 * se_log_hr))
-}
-
-
-# --- 5️⃣ Compute HR(t) + CIs for all combinations ---
-hr_ci_list <- lapply(1:nrow(combinations), function(i) {
-  df <- compute_hr_ci(
-    symbiont = combinations$SymbiontTreatment[i],
-    temp = combinations$Temperature[i],
-    cross = combinations$Cross_2[i],
-    coefs = coefs,
-    vcov_mat = vcov_mat,
-    time_grid = time_grid
-  )
-  df$Group <- paste(combinations$Temperature[i], combinations$SymbiontTreatment[i], combinations$Cross_2[i], sep = "°C ")
-  df
-})
-
-df_hr_ci <- do.call(rbind, hr_ci_list)
-
-# --- 6️⃣ Plot with ggplot2 ---
-library(ggplot2)
-
-ggplot(df_hr_ci, aes(x = Day, y = HR, color = Group, fill = Group)) +
-  geom_line(size = 1.2) +
-  geom_ribbon(aes(ymin = Lower, ymax = Upper), alpha = 0.2, color = NA) +
-  labs(x = "Time (days)", y = "Hazard Ratio vs Ambient") +
-  theme_minimal() +
-  scale_color_brewer(palette = "Set1") +
-  scale_fill_brewer(palette = "Set1")
-
-
-# Create a dataframe of p-values to include on the plots
-facet_pvals <- metadata_clean %>%
-  group_by(ReefMom, SymbiontTreatment) %>%
-  summarise(
-    p = tryCatch({
-      survdiff(Surv(Timepoint, Status) ~ Treatment, data = pick(everything()))$chisq %>%
-        {1 - pchisq(., df = n_distinct(Treatment) - 1)}
-    }, error = function(e) NA),
-    .groups = "drop"
-  ) %>%
-  mutate(
-    label = paste0("p = ", signif(p, 3)),
-    x = 0,         # adjust as needed for your plot's x-axis scale
-    y = 0.05       # adjust as needed for your plot's y-axis scale
-  )
-
-#add p-values to the plot by facet
-survival_curves_facet_Symb <- ggsurv$plot +
-  facet_grid(ReefMom ~ SymbiontTreatment) +
-  theme_bw() +
-  theme(
-    strip.background = element_blank(),
-    strip.text = element_text(color = "black", face = "italic", size = 12),
-    legend.position = "none"
-  ) +
-  geom_text(data = facet_pvals, aes(x = x, y = y, label = label),
-            inherit.aes = FALSE, hjust = 0, vjust = 0, size = 4)
-
-#save
-ggsave("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/survival_curves_facet_Symb.png", plot = survival_curves_facet_Symb, width = 10, height = 20, dpi = 300)
-
-# Extract survival probabilities at a specific time, e.g., time = 22
-# You can do this using the 'summary()' function with the 'time' argument
-surv_summary <- summary(km.symb, times = 22)
-
-# Print the survival probability at time 22
-print(surv_summary$surv)  # This gives the survival probabilities
-
-# Fit survival by Treatment + ReefMom + SymbiontTreatment
-km.symb2 <- survfit(Surv(Timepoint, Status) ~ Treatment + ReefMom, data = metadata_clean)
-surv_summary <- summary(km.symb2, times = 15)
-
-# Subset for 27.5°C
-data_27 <- metadata_clean %>% filter(Treatment == "Ambient")
-
-# Subset for 31°C
-data_31 <- metadata_clean %>% filter(Treatment == "31")
-
-# KM log-rank test at 27.5°C
-survdiff(Surv(Timepoint, Status) ~ ReefMom, data = data_27)
-
-# KM log-rank test at 31°C
-survdiff(Surv(Timepoint, Status) ~ ReefMom, data = data_31)
-
-survdiff(Surv(Timepoint, Status) ~ Treatment * ReefMom, data = metadata_clean)
-
-###
-#Simplify figure to just Treatment
-###
-
-# Ensure Treatment is a factor with correct order
-metadata_clean$Treatment <- factor(metadata_clean$Treatment,
-                                   levels = c("Ambient", "31", "35.5"),
-                                   labels = c("27.5°C", "31°C", "35.5°C"))
-
-# Fit KM model by Treatment only
-km_fit <- survfit(Surv(Timepoint, Status) ~ Treatment, data = metadata_clean)
-
-# Define treatment colors
-treatment_colors <- c(
-  "Treatment=27.5°C" = "#3288bd",
-  "Treatment=31°C"   = "#fee08b",
-  "Treatment=35.5°C" = "#d53e4f"
-)
-
-# Plot
-km_plot <- ggsurvplot(
-  km_fit,
-  data = metadata_clean,
-  conf.int = TRUE,
-  pval = TRUE,
-  palette = treatment_colors,
-  legend.title = "Temperature",
-  xlab = "Time (days)",
-  ylab = "Survival probability",
-  risk.table = FALSE
-)
-
-# Display plot
-print(km_plot)
-
-# Save if needed
-ggsave("C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/KM_survival_by_Treatment.png", plot = km_plot$plot, width = 8, height = 6, dpi = 300)
-
-# Pairwise comparisons with log-rank test
-pairwise_res <- pairwise_survdiff(Surv(Timepoint, Status) ~ Treatment,
-                                  data = metadata_clean,
-                                  p.adjust.method = "BH")  # Benjamini-Hochberg correction for multiple testing
-
-print(pairwise_res$p.value)
-
-```
-##Survival Analysis
-Cox model: with Treatment and Cross_2
-```{r}
-# Determine the class of the Factors (not the covariates):
-class(metadata_clean$Cross_2)
-#If any of the factors is not a “factor”, redefine it as a factor:
-metadata_clean$Cross_2 <- factor(metadata_clean$Cross_2)
-# Check for missing values in the columns used in the model
-sum(is.na(metadata_clean$Cross_2))
-
-X3<-cbind(metadata_clean$Treatment, metadata_clean$Cross_2)# if you don’t have covariates, do not include them
-# if observations are right censored:
-cox3 <- coxph (Surv(Timepoint, Status)~ X3, method='breslow', data = metadata_clean)
-summary(cox3)
-
-# Plot
-# To plot the predicted probability of an event not occurring over time (for significant factors only) and use the model to make predictions
-
-km3 <-survfit(Surv(Timepoint,Status)~ Treatment + Cross_2, data = metadata_clean) # do not include interactions
-km3
-summary(km3)
-
-# Plot the survival curves
-km3$strata
-
-plot(km3, 
-     lwd = 2, 
-     xlab = 'Time', 
-     ylab = 'Probability of the Event not to occur', 
-     lty = c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21),
-     col = c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21),  # Dynamically adjust colors
-     conf.int = FALSE)
-
-#Use ggplot
-ggsurvplot(km3)
-# Create a combined label for legend
-metadata_clean$combined_label2 <- with(metadata_clean, paste(Treatment, Cross_2, sep = "."))
-
-# Now refit the survival object
-km4 <- survfit(Surv(Timepoint, Status) ~ combined_label2, data = metadata_clean)
-
-# Generate unique labels for the legend based on combined_label
-unique_combined_labels <- levels(as.factor(metadata_clean$combined_label2))
-
-# Plot the survival curves
-ggsurv_all <- ggsurvplot(km4, 
-           data = metadata_clean, 
-           conf.int = TRUE, 
-           pval = TRUE, 
-           risk.table = FALSE, 
-           legend.title = "Treatment.Cross_2",
-           legend.labs = unique_combined_labels,  # Now use combined labels
-           title = "Kaplan-Meier Curve for Genet Survival", 
-           risk.table.height = 2)
-
-#ggsave("C:/Users/bellb/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/survival_curves.png", plot = ggsurv_all$plot, width = 10, height = 8, dpi = 300)
-
-ggsurv_all$plot +theme_bw()
-
-### FACET
-
-# Fit the Kaplan-Meier survival curve
-km5 <- survfit(Surv(Timepoint, Status) ~ Treatment + Cross_2, data = metadata_clean)
-
-summary(km5)
-
-ggsurv <- ggsurvplot(km5, conf.int = TRUE)
-
-ggsurv$plot +theme_bw() + facet_wrap(~ Treatment)
-
-# Ensure Treatment is a factor with specified levels
-metadata_clean$Treatment <- factor(metadata_clean$Treatment, levels = c("Ambient", "31", "35.5"))
-
-# Create custom color names for each curve
-custom_curve_names2 <- c("aquamarine3", "orange", "aquamarine3", "orange", "aquamarine3", "orange")
-
-levels(km5$strata)
-
-# Create the survival plot with custom colors
-ggsurv <- ggsurvplot(km5, conf.int = TRUE, 
-                     palette = custom_curve_names2,  # Custom color palette
-                     legend.title = "Source Reef",
-                     conf.int.alpha = 0.2)  # Set legend title
-
-# Customize the plot
-final_plot <- ggsurv$plot + 
-              theme_bw() + 
-              facet_wrap(~ Treatment)  # Faceting by Treatment
-
-# Save the plot using ggsave
-#ggsave("C:/Users/bellb/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/survival_curves_facet_SourceReef.png", plot = final_plot, width = 10, height = 5, dpi = 300)
-
-#Bonferroni post-hoc test
-# Perform pairwise comparisons of survival curves
-pair <- pairwise_survdiff(Surv(Timepoint, Status) ~ Treatment + Cross_2, 
-                  data = metadata_clean,
-                  p.adjust.method = "bonferroni")
-
-pair
-
-# Symbolic number coding
-symnum(pair$p.value, cutpoints = c(0, 0.0001, 0.001, 0.01, 0.05, 0.1, 1),
-   symbols = c("****", "***", "**", "*", "+", " "),
-   abbr.colnames = FALSE, na = "")
-
-# Extract survival probabilities at a specific time, e.g., time = 22
-# You can do this using the 'summary()' function with the 'time' argument
-surv_summary <- summary(km5, times = 22)
-
-# Print the survival probability at time 22
-print(surv_summary$surv)  # This gives the survival probabilities
-
-#at day 22:
-# ambient BxB = 0.4891414 +- 0.0836
-# ambient TxT = 0.8182818 +- 0.0693
-# 31 BxB = 0.1330052 +- 0.0438
-# 31 TxT = 0.1398107 +- 0.0406
-# 35.5 = 0.0000000 and 0.0000000
-
-
-```
-
-Survival Analysis
-Just Treatment as a variable
-
-```{r}
-# Fit the Kaplan-Meier survival curve
-km6 <- survfit(Surv(Timepoint, Status) ~ Treatment, data = metadata_clean)
-
-summary(km6)
-
-#Bonferroni post-hoc test
-# Perform pairwise comparisons of survival curves
-pair2 <- pairwise_survdiff(Surv(Timepoint, Status) ~ Treatment, 
-                  data = metadata_clean,
-                  p.adjust.method = "bonferroni")
-
-pair2
-```
-#HEATMAP WITH SOURCE REEF (CC and WW instead of individial families)
-
-##Fv/Fm with Source Reef
+# Create Figure 2 Heatmap with Source Reef
+## Fv/Fm with Source Reef
 ```{r}
 #Fv/Fm #################################################### 
 library(MCMCglmm)
@@ -2190,12 +955,9 @@ summary_df <- results_df[, c("Effect",
 print(summary_df)
 
 ```
-
-##Larval Size with Source Reef
+## Larval Size with Source Reef
 ```{r}
-
 #Larval Size #####################################
-
 # Ensure factors are ordered
 df_with_extremes$Treatment <- factor(df_with_extremes$Treatment, 
                                      levels = c("Ambient", "31", "35.5"))
@@ -2723,11 +1485,8 @@ summary_df <- results_df[, c("Effect",
 
 # Print
 print(summary_df)
-
-
 ```
-
-##Cell Density with Source Reef
+## Cell Density with Source Reef
 ```{r}
 #Cell Density ############################################
 
@@ -3338,7 +2097,7 @@ pairwise_diff_ts <- pairwise_diff_ts %>%
 
 head(pairwise_diff_ts)
 ```
-##Survival GLMM with glmmTMB package and Source Reef
+## Survival GLMM with glmmTMB package and Source Reef
 ```{r}
 # Load libraries
 library(dplyr)
@@ -3719,7 +2478,7 @@ print(summary_df)
 write.csv(summary_df, "glmmTMB_relative_r2.csv", row.names = FALSE)
 saveRDS(summary_df, "glmmTMB_relative_r2.rds")
 ```
-Make a "mega heatmap" with all 5 traits using CROSS_2
+## Make a "mega heatmap" with all 5 traits
 ```{r}
 newdat_size_reef$Trait <- "Larval Size"
 newdat.reef$Trait <- "Fv/Fm"
@@ -3774,8 +2533,7 @@ ggplot(big_heatmap_df, aes(x = Treatment, y = Cross_2, fill = mean_control)) +
   )
 
 ```
-
-Log transformed big heatmap
+## Log transformed big heatmap
 ```{r}
 signed_log <- function(x) {
   sign(x) * log1p(abs(x))
@@ -3995,7 +2753,7 @@ heatmap_stars<- ggplot(big_heatmap_sig_only, aes(x = Treatment_Symbiont, y = Cro
 
 ggsave("C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/heatmap_stars.png", plot = heatmap_stars, width = 5, height = 5, dpi = 300)
 ```
-### FINAL HEAT MAP
+## FINAL HEAT MAP
 ```{r}
 # Store original (untransformed) means before transformation
 newdat.reef$raw_mean <- newdat.reef$mean_global
@@ -4085,8 +2843,7 @@ ggplot(df_with_extremes, aes(x = interaction(Treatment, Cross_2, SymbiontTreatme
 
 
 ```
-
-Survivors Only: Fv/Fm
+## Survivors Only: Fv/Fm
 ```{r}
 #Fv/Fm #################################################### 
 library(MCMCglmm)
@@ -4662,83 +3419,8 @@ pairwise_diff_ts <- pairwise_diff_ts %>%
 
 head(pairwise_diff_ts)
 
-# ---- Variance Partitioning between SymbiontTreatment, Cross_2, and Treatment ----
-
-# Load packages
-library(vegan)
-library(dplyr)
-library(ggplot2)
-
-# ---- Step 1: Define predictors and response ----
-Y <- subset_df$RawChangeFvFm
-# SymbiontTreatment, Cross_2, Treatment are factors in your df
-
-# ---- Step 2: Variance partitioning ----
-varpart_result <- varpart(Y, ~SymbiontTreatment, ~Cross_2, ~Treatment, data = subset_df)
-
-# Get adjusted R² fractions
-fractions <- varpart_result$part$indfract$Adj.R.square
-fractions[fractions < 0] <- 0  # truncate negatives
-
-# ---- Step 3: RDA + permutation tests for unique fractions ----
-# Unique Symbiont
-rda_X1 <- rda(subset_df$RawChangeFvFm ~ SymbiontTreatment + Condition(Cross_2 + Treatment), 
-              data = subset_df)
-anova_X1 <- anova(rda_X1, permutations = 999)
-
-# Unique Cross
-rda_X2 <- rda(subset_df$RawChangeFvFm ~ Cross_2 + Condition(SymbiontTreatment + Treatment), data = subset_df)
-anova_X2 <- anova(rda_X2, permutations = 999)
-
-# Unique Treatment
-rda_X3 <- rda(subset_df$RawChangeFvFm ~ Treatment + Condition(SymbiontTreatment + Cross_2), data = subset_df)
-anova_X3 <- anova(rda_X3, permutations = 999)
-
-# ---- Step 4: Compile table for manuscript ----
-varpart_table <- data.frame(
-  Component = c("Unique Symbiont", "Unique Cross", "Unique Treatment", 
-                "Shared Symbiont/Cross", "Shared Symbiont/Treatment", 
-                "Shared Cross/Treatment", "Shared All", "Residual"),
-  Adj_R2 = c(fractions[1], fractions[2], fractions[3], 
-             fractions[4], fractions[5], fractions[6], fractions[7], fractions[8]),
-  F_stat = c(anova_X1$F[1], anova_X2$F[1], anova_X3$F[1], NA, NA, NA, NA, NA),
-  df_num = c(anova_X1$Df[1], anova_X2$Df[1], anova_X3$Df[1], NA, NA, NA, NA, NA),
-  df_den = c(anova_X1$Df[2], anova_X2$Df[2], anova_X3$Df[2], NA, NA, NA, NA, NA),
-  p_value = c(anova_X1$`Pr(>F)`[1], anova_X2$`Pr(>F)`[1], anova_X3$`Pr(>F)`[1], NA, NA, NA, NA, NA),
-  n = nrow(subset_df)
-)
-
-# View the table
-varpart_table
-
-# ---- Step 5: Optional Venn diagram ----
-plot(varpart_result, bg = c("red", "blue", "green"), 
-     Xnames = c("Symbiont", "Cross", "Treatment"))
-
-# ---- Step 6: Optional ggplot barplot ----
-varpart_df <- varpart_table %>%
-  select(Component, Adj_R2)
-
-ggplot(varpart_df, aes(x = Component, y = Adj_R2, fill = Component)) +
-  geom_bar(stat = "identity", width = 0.7) +
-  geom_text(aes(label = sprintf("%.3f", Adj_R2)), vjust = -0.5, size = 3) +
-  theme_minimal(base_size = 14) +
-  ylab("Proportion of variance explained (adjusted R²)") +
-  xlab("") +
-  ggtitle("Variance Partitioning: Symbiont vs Cross vs Treatment") +
-  theme(legend.position = "none")
-
-# Save Venn diagram as PNG
-   # Just hover over the plot and right click to save image
-
-ggsave("C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/FvFm_SURVIVORS_VariancePartition_Barplot.png", plot = p, width = 10, height = 6, dpi = 300)
-
-write.csv(varpart_table, 
-          file = "C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/FvFm_SURVIVORS_varpart_table.csv",
-          row.names = FALSE)
-
 ```
-Cell Density and Survival
+## Survivors only Cell Density
 ```{r}
 #############################
 ### Modeling variables separate for each health metric to get relative contributions ###
@@ -5215,7 +3897,7 @@ head(pairwise_diff_ts)
 
 save.image(file = "my_workspace_15_07_2025.RData")
 ```
-Larval Size with Survivors only
+## Survivors only Larval Size
 ```{r}
 #Larval Size #####################################
 
@@ -5691,8 +4373,7 @@ head(pairwise_diff_ts)
 
 
 ```
-
-##Get temp data
+## Get temp data for reef sites
 ```{r}
 install.packages("rerddap")
 library(rerddap)
@@ -5887,7 +4568,6 @@ cumulative_dhw <- dhw_summary %>%
   summarise(total_dhw = sum(max_dhw, na.rm = TRUE))
 
 ```
-
 ## Site Map
 ```{r}
 # Load required libraries
@@ -5994,128 +4674,7 @@ combined_plot
 
 ggsave("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/Ningaloo_Site_Map_SST.png", plot = combined_plot, device = "png", width = 10, height = 5, dpi = 300)
 ```
-##Save environment
-```{r}
-save.image(file = "C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/Larval Infection Experiment/my_environment_13_6_25.RData")
-```
-Daily SST for DHW
-```{r}
-library(ncdf4)     # for reading NetCDF
-library(dplyr)
-library(lubridate)
-library(zoo)
-library(tidyr)
-
-nc <- nc_open("C:/Users/jc980786/Downloads/NingalooReef_1985-2022SST_new.nc")
-
-# Check variables
-print(nc)
-
-# Extract variables
-lon <- ncvar_get(nc, "lon")          # length 10
-lat <- ncvar_get(nc, "lat")          # length 35
-time <- ncvar_get(nc, "time")        # length 13872
-sst_raw <- ncvar_get(nc, "analysed_sst")  # 3D array lon x lat x time
-
-# Convert time to Date
-time_origin <- as.Date("1985-01-01")  # ignoring 12:00 noon difference
-dates <- time_origin + time
-
-nc_close(nc)
-
-# Apply scale factor
-sst <- sst_raw * 0.01
-
-# Create a data frame with all combinations and sst values
-grid <- expand.grid(lon = lon, lat = lat)
-
-# For memory efficiency, process in chunks or just example for one time point:
-# But here: reshape full 3D array into long format
-
-# Permute sst array to time x lon x lat for easier reshaping
-sst_perm <- aperm(sst, c(3,1,2))  # now dim: time x lon x lat
-
-# Convert to data frame:
-df_list <- lapply(1:length(dates), function(i) {
-  temp_df <- expand.grid(lon = lon, lat = lat)
-  temp_df$sst <- as.vector(sst_perm[i,,])
-  temp_df$date <- dates[i]
-  temp_df
-})
-
-sst_long <- bind_rows(df_list)
-
-# Filter coordinates for your sites
-tantabiddi_coords <- list(lon_min = 113.95, lon_max = 113.97, lat_min = -21.95, lat_max = -21.93)
-bruboodjoo_coords <- list(lon_min = 113.75, lon_max = 113.80, lat_min = -22.98, lat_max = -22.92)
-
-sst_filtered <- sst_long %>%
-  filter(
-    (lon >= tantabiddi_coords$lon_min & lon <= tantabiddi_coords$lon_max & lat >= tantabiddi_coords$lat_min & lat <= tantabiddi_coords$lat_max) |
-    (lon >= bruboodjoo_coords$lon_min & lon <= bruboodjoo_coords$lon_max & lat >= bruboodjoo_coords$lat_min & lat <= bruboodjoo_coords$lat_max)
-  ) %>%
-  mutate(site = case_when(
-    lon >= tantabiddi_coords$lon_min & lon <= tantabiddi_coords$lon_max &
-      lat >= tantabiddi_coords$lat_min & lat <= tantabiddi_coords$lat_max ~ "Tantabiddi",
-    lon >= bruboodjoo_coords$lon_min & lon <= bruboodjoo_coords$lon_max &
-      lat >= bruboodjoo_coords$lat_min & lat <= bruboodjoo_coords$lat_max ~ "Bruboodjoo",
-    TRUE ~ NA_character_
-  )) %>%
-  filter(!is.na(site))
-
-# Average daily SST per site
-daily_sst <- sst_filtered %>%
-  group_by(site, date) %>%
-  summarise(daily_sst = mean(sst, na.rm = TRUE), .groups = "drop")
-
-# Add year and month columns
-daily_sst <- daily_sst %>%
-  mutate(year = year(date), month = month(date))
-
-# Calculate monthly mean SST per site/year/month
-monthly_means <- daily_sst %>%
-  group_by(site, year, month) %>%
-  summarise(monthly_mean_sst = mean(daily_sst, na.rm = TRUE), .groups = "drop")
-
-# Calculate annual MMM = max monthly mean SST per site/year
-mmm_annual <- monthly_means %>%
-  group_by(site, year) %>%
-  summarise(mmm = max(monthly_mean_sst, na.rm = TRUE), .groups = "drop")
-
-sst_with_mmm <- daily_sst %>%
-  left_join(mmm_annual, by = c("site", "year")) %>%
-  arrange(site, date) %>%
-  mutate(
-    hotspot = ifelse(daily_sst > (mmm + 1), daily_sst - mmm, 0)
-  )
-
-library(zoo)
-
-# Rolling window width = 84 days
-window_days <- 84
-
-sst_with_dhw <- sst_with_mmm %>%
-  group_by(site) %>%
-  arrange(date) %>%
-  mutate(
-    dhw = rollapply(hotspot, width = window_days, FUN = function(x) sum(x) / 7, align = "right", fill = NA)
-  ) %>%
-  ungroup()
-
-dhw_summary <- sst_with_dhw %>%
-  group_by(site, year) %>%
-  summarise(max_dhw = max(dhw, na.rm = TRUE), .groups = "drop")
-
-dhw_years_gt8 <- dhw_summary %>%
-  group_by(site) %>%
-  summarise(years_dhw_over_8 = sum(max_dhw > 8, na.rm = TRUE))
-
-print(dhw_years_gt8)
-
-
-
-```
-
+## Daily SST for DHW
 ```{r}
 # Load packages
 library(ncdf4)
@@ -6313,9 +4872,7 @@ t_test_variability <- t.test(sst_sd_wide$Tantabiddi, sst_sd_wide$Bruboodjoo, pai
 
 
 ```
-
-Load in data from Fv/Fm to get percentage of larvae with symbiont cells
-
+## Load in data from Fv/Fm to get percentage of larvae with symbiont cells
 ```{r}
 #install.packages("MCMCglmm")
 library(MCMCglmm)
@@ -6660,7 +5217,7 @@ summary_stats_means <- ipam_taxa_survived %>%
     .groups = "drop"
   )
 ```
-Combine PercentageWithCells and Cell Density
+## Combine PercentageWithCells and Cell Density for comparisons
 ```{r}
 # Load patchwork library
 library(patchwork)
@@ -6753,8 +5310,7 @@ ggsave("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Sp
 
 
 ```
-Plot of mean size at T22
-
+## Plot of mean size at T22
 ```{r}
 # Replace NA values with zeros in the Area..mm.2. column
 df_clean$Area..mm.2.[is.na(df_clean$Area..mm.2.)] <- 0
@@ -6915,9 +5471,7 @@ day1_temp_df_full <- all_temps %>%
 day1_temp_df_full
 
 ```
-
-Plot of percent change in size
-
+## Plot of percent change in size
 ```{r}
 
 # Group by Treatment, Cross_2, and SymbiontTreatment, and calculate mean and standard error for percent change
@@ -7043,7 +5597,7 @@ print(combined_plot_perc_area)
 # Save the combined plot as a PNG file
 ggsave("combined_plot_perc_area_inset.png", plot = combined_plot_perc_area, width = 6, height = 3, dpi = 300)
 ```
-Combine area and perc change area plots
+## Combine area and perc change area plots
 ```{r}
 # Install patchwork if you haven't already
 install.packages("patchwork")
@@ -7061,9 +5615,7 @@ print(combined_plot)
 ggsave("combined_plot.png", plot = combined_plot, width = 12, height = 6, dpi = 300)
 
 ```
-
-Percent change in size for survivors
-
+## Percent change in size for survivors
 ```{r}
 # Group by Treatment, Cross_2, and SymbiontTreatment, and calculate mean and standard error for percent change
 perc_change_summary <- totaldf_long %>%
@@ -7125,9 +5677,7 @@ ggsave("percent_change_area_plot.png",
        height = 7,          # Set the height of the plot (in inches)
        dpi = 300)           # Set the resolution (300 dpi is good for publications)  
 ```
-
-Combine the 3 plots for size into one figure
-
+### Combine the 3 plots for size into one figure
 ```{r}
 # Combine the three plots into one figure
 combined_plot2 <- area_plot +  theme(legend.position = "none") +
@@ -7145,12 +5695,8 @@ ggsave("C:/Users/bellb/OneDrive - James Cook University/Australia/Ningaloo Spawn
        dpi = 300)           # Set the resolution (300 dpi is good for publications)  
 
 ```
-
-Plot of mean FV/FM at T22
-(first measurements taken at T4)
-
+## Plot of mean FV/FM at T22 (first measurements taken at T4)
 ```{r}
-
 # Filter the dataframe to get data for the final timepoint (22)
 final_timepoint_fvfm_df <- totaldf_long %>%
   filter(Timepoint == 22) %>%
@@ -7286,10 +5832,7 @@ print(combined_plot_mean_fvfm)
 ggsave("C:/Users/bellb/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/combined_plot_mean_fvfm_inset.png", plot = combined_plot_mean_fvfm, width = 6, height = 3, dpi = 300)
 
 ```
-
-
-Plot of raw change in Fv/Fm (% change has too large of error margins for survivors GLMM)
-
+## Plot of raw change in Fv/Fm (% change has too large of error margins for survivors GLMM)
 ```{r}
 
 # Group by Treatment, Cross_2, and SymbiontTreatment, and calculate mean and standard error for percent change
@@ -7444,9 +5987,7 @@ print(combined_plot_raw_fvfm)
 # Save the combined plot as a PNG file
 ggsave("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/combined_plot_raw_fvfm_inset.png", plot = combined_plot_raw_fvfm, width = 6, height = 3, dpi = 300)
 ```
-
-Raw change in FVFM for survivors
-
+## Raw change in FV/FM for survivors
 ```{r}
 # Group by Treatment, Cross_2, and SymbiontTreatment, and calculate mean and standard error for percent change
 raw_change_fvfm_summary <- totaldf_long %>%
@@ -7540,9 +6081,7 @@ ggsave("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Sp
        dpi = 300)           
 
 ```
-
-Combine the 3 plots for size into one figure
-
+## Combine the 3 plots for Fv/Fm into one figure
 ```{r}
 # Combine the three plots into one figure
 combined_plot3 <- fvfm_plot + theme(legend.position = "none") + 
@@ -7560,7 +6099,7 @@ ggsave("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Sp
        dpi = 300)           
 
 ```
-Percentage of Larvae with Cells: line graphs
+## Percentage of Larvae with Cells: line graphs
 ```{r}
 library(dplyr)
 library(ggplot2)
@@ -7730,7 +6269,7 @@ print(combined_pct_plot)
 ggsave("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Spawning 2024/combined_plot_mean_percentage_with_cells_inset.png", plot = combined_pct_plot, width = 6, height = 3, dpi = 300)
 
 ```
-PercentageWithCells from Day 1 to Day 22
+## PercentageWithCells from Day 1 to Day 22
 ```{r}
 summary_df2_survived <- summary_df2_survived %>%
   group_by(SymbiontTreatment, Treatment, Cross) %>%
@@ -8014,7 +6553,7 @@ perc_change_plot3 <- ggplot(perc_change_summary2, aes(
   )
 
 ```
-Combine all of the plots
+## Combine all of the plots
 ```{r}
 # Combine the three plots into one figure
 combined_plot_pct <- 
@@ -8036,7 +6575,7 @@ ggsave("C:/Users/bellb/OneDrive - James Cook University/Australia/Ningaloo Spawn
        height = 7,          # Set the height of the plot (in inches)
        dpi = 300)           # Set the resolution (300 dpi is good for publications)  
 ```
-Line graphs of Cell Density
+## Line graphs of Cell Density
 ```{r}
 library(dplyr)
 library(ggplot2)
@@ -8182,7 +6721,7 @@ ggsave("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Sp
        width = 6, height = 3, dpi = 300)
 
 ```
-Percent change difference between T0 and T22
+## Percent change difference between T0 and T22
 ```{r}
 library(dplyr)
 library(ggplot2)
@@ -8318,7 +6857,7 @@ ggsave("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Sp
 
 
 ```
-Cell Density by ReefMom (Log transformed)
+## Cell Density by ReefMom (Log transformed)
 ```{r}
 # Summarize perc change including ReefMom
 log_change_summary_by_reef <- df_subset %>%
@@ -8372,8 +6911,7 @@ print(log_change_plot_faceted)
 
 
 ```
-
-Combine all of the plots
+## Combine all of the plots
 ```{r}
 # Combine the three plots into one figure
 combined_plot_cd <- cd_plot + 
@@ -8392,8 +6930,7 @@ ggsave("C:/Users/jc980786/OneDrive - James Cook University/Australia/Ningaloo Sp
        height = 7,          # Set the height of the plot (in inches)
        dpi = 300)           # Set the resolution (300 dpi is good for publications)  
 ```
-
-##Percentage of Larvae that Acquired Cells with Source Reef
+## Percentage of Larvae that Acquired Cells with Source Reef
 ```{r}
 #Percentage with Cells ############################################
 
@@ -8988,8 +7525,7 @@ summary_df <- results_df[, c("Effect",
 # Print
 print(summary_df)
 ```
-
-##ONLY SURVIVORS: Percentage of Larvae that Acquired Cells with Source Cross
+## ONLY SURVIVORS: Percentage of Larvae that Acquired Cells with Source Cross
 ```{r}
 #Percentage with Cells ############################################
 
@@ -9500,118 +8036,6 @@ pairwise_diff_ts <- pairwise_diff_ts %>%
 
 head(pairwise_diff_ts)
 ```
-### Get CIs of Hazard Ratios ###
-```{r}
-library(ggplot2)
-library(dplyr)
-
-# Time grid and model coefficients
-time_grid <- 1:22
-coefs <- coef(cox_td_3way)
-vcov_mat <- vcov(cox_td_3way)
-
-# Define all combination
-combinations <- expand.grid(
-  SymbiontTreatment = c("C", "D"),
-  Temperature = c("31", "35.5"),
-  Cross_2 = c("BxB", "TxT")
-)
-
-# Function to compute HR + 95% CI
-compute_hr_ci <- function(symbiont, temp, cross, coefs, vcov_mat, time_grid) {
-  
-  tt_term <- if(temp == "31") "tt(Treat31)" else "tt(Treat35.5)"
-  
-  coef_vec <- rep(0, length(coefs))
-  names(coef_vec) <- names(coefs)
-  
-  coef_vec[tt_term] <- 1
-  
-  sym_tt <- paste0("SymbiontTreatmentD:", tt_term)
-  if(symbiont == "D" & sym_tt %in% names(coefs)) coef_vec[sym_tt] <- 1
-  
-  cross_tt <- paste0("Cross_2TxT:", tt_term)
-  if(cross == "TxT" & cross_tt %in% names(coefs)) coef_vec[cross_tt] <- 1
-  
-  threeway <- paste0("SymbiontTreatmentD:Cross_2TxT:", tt_term)
-  if(symbiont == "D" & cross == "TxT" & threeway %in% names(coefs)) coef_vec[threeway] <- 1
-  
-  idx <- which(coef_vec != 0)
-  
-  log_hr <- sapply(time_grid, function(t) sum(coef_vec[idx] * log(t)))
-  se_log_hr <- sapply(time_grid, function(t) sqrt(sum((log(t)^2) * diag(vcov_mat[idx, idx]))))
-  
-  data.frame(
-    Day = time_grid,
-    HR = exp(log_hr),
-    Lower = exp(log_hr - 1.96 * se_log_hr),
-    Upper = exp(log_hr + 1.96 * se_log_hr)
-  )
-}
-
-# --- 4️⃣ Compute HR + CIs for all combinations ---
-df_hr_ci <- bind_rows(lapply(1:nrow(combinations), function(i) {
-  df <- compute_hr_ci(
-    symbiont = combinations$SymbiontTreatment[i],
-    temp = combinations$Temperature[i],
-    cross = combinations$Cross_2[i],
-    coefs = coefs,
-    vcov_mat = vcov_mat,
-    time_grid = time_grid
-  )
-  
-  # Find last observed death for this group
- max_day <- max(metadata_clean$Timepoint[
-  as.character(metadata_clean$SymbiontTreatment) == combinations$SymbiontTreatment[i] &
-  as.character(metadata_clean$Treatment) == combinations$Temperature[i] &
-  as.character(metadata_clean$Cross_2) == combinations$Cross_2[i] &
-  metadata_clean$Status == 1
-])
-  
-  df <- df %>% filter(Day <= max_day)
-  df$Group <- paste(combinations$Temperature[i], combinations$SymbiontTreatment[i], combinations$Cross_2[i], sep = "°C ")
-  df
-}))
-
-# Remove rows corresponding to 35.5°C beyond day 6
-df_hr_ci_trim <- df_hr_ci[-c(51:66, 73:88, 139:154, 161:176), ]
-
-# --- 5️⃣ Plot ---
-ggplot(df_hr_ci_trim, aes(x = Day, y = HR, color = Group, fill = Group)) +
-  geom_line(size = 1.2) +
-  geom_ribbon(aes(ymin = Lower, ymax = Upper), alpha = 0.2, color = NA) +
-  labs(x = "Time (days)", y = "Hazard Ratio vs Ambient") +
-  theme_minimal() +
-  scale_color_brewer(palette = "Set1") +
-  scale_fill_brewer(palette = "Set1")
-
-# Recode 0% survival as Dead and ensure column is character
-metadata_clean_T6 <- metadata_clean %>%
-  mutate(
-    Alive..Dead..Sampled = as.character(Alive..Dead..Sampled),
-    Alive..Dead..Sampled = ifelse(Percent_Survival_atend == 0, "Dead", Alive..Dead..Sampled),
-    Alive..Dead..Sampled = ifelse(Alive..Dead..Sampled == "Alive", "Alive", "Dead")
-  )
-
-# Subset to 35.5°C and first 5 days
-subset_35 <- metadata_clean_T6 %>%
-  filter(Treatment == "35.5", Timepoint <= 5)
-
-# Summarize percent survival at each timepoint
-survival_timecourse <- subset_35 %>%
-  group_by(SymbiontTreatment, Cross_2, Timepoint) %>%
-  summarise(
-    n_total = n(),
-    n_alive = sum(Alive..Dead..Sampled == "Alive"),
-    survival_prop = n_alive / n_total
-  ) %>%
-  ungroup()
-
-survival_timecourse
-
-
-```
-
 ### Experimental DHW Barplot ###
 ```{r}
 library(ggplot2)
@@ -9708,10 +8132,9 @@ ggplot(df_dhw, aes(x = Day, y = DHW, fill = Category)) +
 
 ggsave("C:/Users/jc980786/OneDrive - James Cook University/GitHub/Larval.Infect.Exp/figures/DHW_plot.png", width = 8, height = 6, dpi = 300)
 ```
-########## Summary figure #############
-Line graphs of all traits (means)
+# Figure 2 
+### Line graphs of all traits (means)
 ```{r}
-
 ###  Size  ###
 summary_df_size_grouped <- df_with_extremes %>%
   mutate(
